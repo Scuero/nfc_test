@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lector Cédula Chilena & DNI NFC</title>
-  <meta name="description" content="Lectura de Cédula de Identidad de Chile (e-ID) y DNI mediante Web NFC API ICAO 9303">
+  <meta name="description" content="Lectura de Cédula de Identidad de Chile (e-ID) y DNI mediante Web NFC API y Código MRZ/PDF417">
   
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -126,7 +126,7 @@
     }
 
     .form-group {
-      margin-bottom: 1.5rem;
+      margin-bottom: 1.25rem;
       text-align: left;
     }
 
@@ -157,6 +157,12 @@
       box-shadow: 0 0 0 3px var(--primary-glow);
     }
 
+    .button-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
     .btn-scan {
       width: 100%;
       padding: 1.1rem;
@@ -180,14 +186,30 @@
       box-shadow: 0 12px 30px rgba(99, 102, 241, 0.6);
     }
 
-    .btn-scan:active {
-      transform: translateY(0);
-    }
-
     .btn-scan:disabled {
       opacity: 0.6;
       cursor: not-allowed;
       transform: none;
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--accent);
+      padding: 0.85rem;
+      border-radius: 14px;
+      font-size: 0.95rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
     }
 
     .result-card {
@@ -197,6 +219,7 @@
       border: 1px solid rgba(255, 255, 255, 0.1);
       border-radius: 16px;
       transition: all 0.3s ease;
+      text-align: left;
     }
 
     .result-card.active {
@@ -209,6 +232,19 @@
       font-weight: 600;
       color: var(--text-main);
       word-break: break-word;
+      margin-bottom: 0.5rem;
+    }
+
+    h3#user-age {
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+
+    p#user-extra {
+      font-size: 0.85rem;
+      color: var(--text-muted);
     }
 
     .status-box {
@@ -240,6 +276,15 @@
       border: 1px solid var(--success-border);
       color: var(--success-text);
     }
+
+    video#camera-feed {
+      width: 100%;
+      max-height: 240px;
+      border-radius: 14px;
+      margin-top: 1rem;
+      display: none;
+      object-fit: cover;
+    }
   </style>
 </head>
 <body>
@@ -258,28 +303,38 @@
     </div>
 
     <h1>Lector Cédula & DNI NFC</h1>
-    <p class="subtitle">Aproxime su Cédula de Identidad de Chile o DNI al teléfono</p>
+    <p class="subtitle">Obtenga Nombre y Edad mediante NFC y Código de Cédula Chilena</p>
 
     <div class="info-note">
-      ℹ️ <strong>Lectura Cédula Chilena (ISO-DEP):</strong> Al acercar la Cédula el celular sonará. La aplicación detectará el pulso del chip e-ID y confirmará el documento.
+      ℹ️ <strong>Instrucciones Cédula Chilena:</strong> Ingrese o escanee las líneas MRZ / Código de la Cédula (al reverso) o el N° de Trámite y acerque la Cédula al NFC para calcular su <strong>Nombre y Edad</strong>.
     </div>
 
     <div class="form-group">
-      <label for="tramite-input">Número de Trámite / Documento / Clave</label>
-      <input type="text" id="tramite-input" placeholder="Ej. 123456789 (Número de Trámite)" autocomplete="off">
+      <label for="tramite-input">Código MRZ / Datos Cédula / N° Trámite</label>
+      <input type="text" id="tramite-input" placeholder="Ej. GONZALEZ<PEREZ<<JUAN<CARLOS... o 850315" autocomplete="off">
     </div>
 
-    <button id="scan-btn" class="btn-scan">
-      <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-      </svg>
-      Escanear Cédula / DNI
-    </button>
+    <div class="button-group">
+      <button id="scan-btn" class="btn-scan">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+        Escanear Cédula NFC
+      </button>
+
+      <button id="camera-btn" class="btn-secondary">
+        📷 Escanear Código PDF417 / MRZ con Cámara
+      </button>
+    </div>
+
+    <video id="camera-feed" autoplay playsinline></video>
 
     <div id="status-box" class="status-box"></div>
 
     <div class="result-card" id="result-card">
       <h2 id="user-name">Nombre: Esperando escaneo...</h2>
+      <h3 id="user-age">Edad: Esperando escaneo...</h3>
+      <p id="user-extra">Documento: Pendiente</p>
     </div>
   </div>
 
