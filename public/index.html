@@ -3,23 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lector Cédula Chilena & DNI NFC</title>
-  <meta name="description" content="Lectura de Cédula de Identidad de Chile (e-ID) y DNI mediante Web NFC API y Código MRZ/PDF417">
+  <title>Lector Cédula Chilena & DNI NFC / PDF417</title>
+  <meta name="description" content="Extracción de datos del reverso de Cédula de Identidad de Chile (RUN, N° Trámite, Nombre, Edad, Vencimiento) mediante Cámara PDF417 y Web NFC">
   
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   
   <style>
     :root {
-      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-      --card-bg: rgba(30, 41, 59, 0.7);
-      --card-border: rgba(255, 255, 255, 0.1);
+      --bg-gradient: linear-gradient(135deg, #0b0f19 0%, #111827 50%, #0b0f19 100%);
+      --card-bg: rgba(17, 24, 39, 0.75);
+      --card-border: rgba(255, 255, 255, 0.12);
       --primary: #6366f1;
       --primary-hover: #4f46e5;
       --primary-glow: rgba(99, 102, 241, 0.4);
       --accent: #38bdf8;
+      --emerald: #10b981;
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
       --error-bg: rgba(239, 68, 68, 0.15);
@@ -45,25 +46,26 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 1.5rem;
+      padding: 1.5rem 1rem;
     }
 
     .container {
       width: 100%;
-      max-width: 480px;
+      max-width: 520px;
       background: var(--card-bg);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--card-border);
       border-radius: 24px;
-      padding: 2.5rem 2rem;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+      padding: 2rem 1.75rem;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
       text-align: center;
     }
 
     .badges {
       display: flex;
       justify-content: center;
+      flex-wrap: wrap;
       gap: 0.5rem;
       margin-bottom: 1rem;
     }
@@ -82,14 +84,15 @@
     .header-icon {
       width: 64px;
       height: 64px;
-      background: rgba(99, 102, 241, 0.1);
-      border: 1px solid rgba(99, 102, 241, 0.3);
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.35);
       border-radius: 20px;
       display: flex;
       align-items: center;
       justify-content: center;
       margin: 0 auto 1.25rem;
       color: var(--accent);
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.2);
     }
 
     .header-icon svg {
@@ -114,15 +117,15 @@
     }
 
     .info-note {
-      background: rgba(56, 189, 248, 0.1);
+      background: rgba(56, 189, 248, 0.08);
       border: 1px solid rgba(56, 189, 248, 0.25);
-      border-radius: 14px;
-      padding: 0.75rem 1rem;
-      font-size: 0.82rem;
+      border-radius: 16px;
+      padding: 0.85rem 1rem;
+      font-size: 0.84rem;
       color: #7dd3fc;
       text-align: left;
       margin-bottom: 1.5rem;
-      line-height: 1.4;
+      line-height: 1.45;
     }
 
     .form-group {
@@ -143,11 +146,12 @@
     input[type="text"] {
       width: 100%;
       padding: 0.9rem 1.1rem;
-      background: rgba(15, 23, 42, 0.6);
+      background: rgba(15, 23, 42, 0.7);
       border: 1px solid rgba(255, 255, 255, 0.15);
       border-radius: 14px;
       color: var(--text-main);
-      font-size: 1rem;
+      font-size: 0.95rem;
+      font-family: 'JetBrains Mono', monospace;
       outline: none;
       transition: all 0.2s ease;
     }
@@ -163,14 +167,37 @@
       gap: 0.75rem;
     }
 
-    .btn-scan {
+    .btn-camera {
       width: 100%;
       padding: 1.1rem;
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      border: none;
+      border-radius: 16px;
+      color: white;
+      font-size: 1.05rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 8px 25px rgba(16, 185, 129, 0.35);
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.6rem;
+    }
+
+    .btn-camera:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 30px rgba(16, 185, 129, 0.5);
+    }
+
+    .btn-scan {
+      width: 100%;
+      padding: 1rem;
       background: linear-gradient(135deg, var(--primary) 0%, #4338ca 100%);
       border: none;
       border-radius: 16px;
       color: white;
-      font-size: 1.1rem;
+      font-size: 1rem;
       font-weight: 600;
       cursor: pointer;
       box-shadow: 0 8px 25px var(--primary-glow);
@@ -186,74 +213,100 @@
       box-shadow: 0 12px 30px rgba(99, 102, 241, 0.6);
     }
 
-    .btn-scan:disabled {
+    .btn-scan:disabled, .btn-camera:disabled {
       opacity: 0.6;
       cursor: not-allowed;
       transform: none;
     }
 
-    .btn-secondary {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: var(--accent);
-      padding: 0.85rem;
-      border-radius: 14px;
-      font-size: 0.95rem;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s ease;
+    /* Overlay de Cámara */
+    .camera-modal {
+      display: none;
+      position: relative;
+      margin-top: 1.25rem;
+      border-radius: 18px;
+      overflow: hidden;
+      border: 2px solid var(--accent);
+      box-shadow: 0 0 25px rgba(56, 189, 248, 0.3);
+      background: #000;
+    }
+
+    .camera-modal.active {
+      display: block;
+    }
+
+    video#camera-feed {
+      width: 100%;
+      max-height: 280px;
+      display: block;
+      object-fit: cover;
+    }
+
+    .scanner-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .scanner-guide {
+      width: 80%;
+      height: 55%;
+      border: 2px dashed rgba(56, 189, 248, 0.8);
+      border-radius: 12px;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+      position: relative;
+    }
+
+    .scanner-line {
+      position: absolute;
+      top: 10%;
+      left: 0;
+      width: 100%;
+      height: 2px;
+      background: #38bdf8;
+      box-shadow: 0 0 12px #38bdf8, 0 0 20px #38bdf8;
+      animation: scanAnim 2s infinite ease-in-out;
+    }
+
+    @keyframes scanAnim {
+      0% { top: 10%; }
+      50% { top: 90%; }
+      100% { top: 10%; }
+    }
+
+    .btn-close-camera {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
-    }
-
-    .btn-secondary:hover {
-      background: rgba(255, 255, 255, 0.15);
-    }
-
-    .result-card {
-      margin-top: 2rem;
-      padding: 1.5rem;
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      border-radius: 16px;
-      transition: all 0.3s ease;
-      text-align: left;
-    }
-
-    .result-card.active {
-      border-color: var(--primary);
-      box-shadow: 0 0 20px var(--primary-glow);
-    }
-
-    h2#user-name {
-      font-size: 1.25rem;
-      font-weight: 600;
-      color: var(--text-main);
-      word-break: break-word;
-      margin-bottom: 0.5rem;
-    }
-
-    h3#user-age {
-      font-size: 1.1rem;
-      font-weight: 500;
-      color: var(--accent);
-      margin-bottom: 0.5rem;
-    }
-
-    p#user-extra {
-      font-size: 0.85rem;
-      color: var(--text-muted);
+      cursor: pointer;
+      z-index: 10;
+      font-weight: bold;
     }
 
     .status-box {
       margin-top: 1rem;
       padding: 0.85rem 1rem;
-      border-radius: 12px;
-      font-size: 0.9rem;
+      border-radius: 14px;
+      font-size: 0.88rem;
       display: none;
       text-align: left;
+      line-height: 1.45;
     }
 
     .status-box.error {
@@ -277,23 +330,131 @@
       color: var(--success-text);
     }
 
-    video#camera-feed {
-      width: 100%;
-      max-height: 240px;
-      border-radius: 14px;
-      margin-top: 1rem;
+    /* Tarjetero de Resultados Detallado */
+    .result-card {
+      margin-top: 1.75rem;
+      padding: 1.5rem;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      transition: all 0.3s ease;
+      text-align: left;
       display: none;
-      object-fit: cover;
+    }
+
+    .result-card.active {
+      display: block;
+      border-color: var(--primary);
+      box-shadow: 0 0 25px var(--primary-glow);
+    }
+
+    .result-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .result-header h2 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .result-badge {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #6ee7b7;
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .data-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem;
+      margin-bottom: 1rem;
+    }
+
+    @media (max-width: 420px) {
+      .data-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .data-item {
+      background: rgba(30, 41, 59, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      padding: 0.75rem 0.85rem;
+    }
+
+    .data-item.full-width {
+      grid-column: 1 / -1;
+    }
+
+    .data-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+    }
+
+    .data-value {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-main);
+      word-break: break-word;
+    }
+
+    .data-value.highlight {
+      color: var(--accent);
+      font-size: 1.05rem;
+    }
+
+    .data-value.mono {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      color: #cbd5e1;
+    }
+
+    .btn-copy-json {
+      width: 100%;
+      padding: 0.75rem;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      color: var(--accent);
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .btn-copy-json:hover {
+      background: rgba(255, 255, 255, 0.15);
     }
   </style>
+
+  <!-- Library ZXing para lectura universal de PDF417 y Barcodes en cualquier navegador -->
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 </head>
 <body>
 
   <div class="container">
     <div class="badges">
       <span class="badge">🇨🇱 Cédula Chilena</span>
-      <span class="badge">🇦🇷 DNI</span>
-      <span class="badge">ICAO 9303</span>
+      <span class="badge">📷 PDF417 / MRZ</span>
+      <span class="badge">📶 Web NFC</span>
     </div>
 
     <div class="header-icon">
@@ -302,42 +463,99 @@
       </svg>
     </div>
 
-    <h1>Lector Cédula & DNI NFC</h1>
-    <p class="subtitle">Obtenga Nombre y Edad mediante NFC y Código de Cédula Chilena</p>
+    <h1>Lector Cédula & DNI</h1>
+    <p class="subtitle">Extracción completa de datos mediante Escáner PDF417 / MRZ y NFC</p>
 
     <div class="info-note">
-      ℹ️ <strong>Instrucciones Cédula Chilena:</strong> Ingrese o escanee las líneas MRZ / Código de la Cédula (al reverso) o el N° de Trámite y acerque la Cédula al NFC para calcular su <strong>Nombre y Edad</strong>.
-    </div>
-
-    <div class="form-group">
-      <label for="tramite-input">Código MRZ / Datos Cédula / N° Trámite</label>
-      <input type="text" id="tramite-input" placeholder="Ej. GONZALEZ<PEREZ<<JUAN<CARLOS... o 850315" autocomplete="off">
+      📷 <strong>Escáner de Reverso Cédula:</strong> Utilice el botón verde de la cámara para enfocar el <strong>código PDF417 o líneas MRZ al reverso</strong> de su Cédula Chilena para extraer RUN, N° de Trámite, Nombre completo, Edad y Vencimiento.
     </div>
 
     <div class="button-group">
+      <button id="camera-btn" class="btn-camera">
+        📷 Escanear Código PDF417 / MRZ con Cámara
+      </button>
+
       <button id="scan-btn" class="btn-scan">
         <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
-        Escanear Cédula NFC
-      </button>
-
-      <button id="camera-btn" class="btn-secondary">
-        📷 Escanear Código PDF417 / MRZ con Cámara
+        Validar Chip Cédula con NFC
       </button>
     </div>
 
-    <video id="camera-feed" autoplay playsinline></video>
+    <div class="camera-modal" id="camera-modal">
+      <button class="btn-close-camera" id="btn-close-camera" title="Cerrar Cámara">✕</button>
+      <video id="camera-feed" autoplay playsinline muted></video>
+      <div class="scanner-overlay">
+        <div class="scanner-guide">
+          <div class="scanner-line"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-top: 1.25rem;">
+      <label for="tramite-input">Datos Escaneados / Línea MRZ / N° Trámite</label>
+      <input type="text" id="tramite-input" placeholder="Los datos escaneados se cargarán aquí automáticamente..." autocomplete="off">
+    </div>
 
     <div id="status-box" class="status-box"></div>
 
+    <!-- Tarjetero de Resultados Detallado -->
     <div class="result-card" id="result-card">
-      <h2 id="user-name">Nombre: Esperando escaneo...</h2>
-      <h3 id="user-age">Edad: Esperando escaneo...</h3>
-      <p id="user-extra">Documento: Pendiente</p>
+      <div class="result-header">
+        <h2 id="card-title">🪪 Datos de Cédula Detectados</h2>
+        <span class="result-badge" id="card-status-badge">Verificado</span>
+      </div>
+
+      <div class="data-grid">
+        <div class="data-item full-width">
+          <div class="data-label">👤 Nombre Completo</div>
+          <div class="data-value highlight" id="val-fullname">Esperando escaneo...</div>
+        </div>
+
+        <div class="data-item">
+          <div class="data-label">🪪 RUN / RUT</div>
+          <div class="data-value mono" id="val-run">--</div>
+        </div>
+
+        <div class="data-item">
+          <div class="data-label">📄 N° de Trámite / Serial</div>
+          <div class="data-value mono" id="val-serial">--</div>
+        </div>
+
+        <div class="data-item">
+          <div class="data-label">🎂 Fecha Nacimiento / Edad</div>
+          <div class="data-value" id="val-birth">--</div>
+        </div>
+
+        <div class="data-item">
+          <div class="data-label">📅 Vencimiento Documento</div>
+          <div class="data-value" id="val-expiry">--</div>
+        </div>
+
+        <div class="data-item">
+          <div class="data-label">🚻 Sexo / Nacionalidad</div>
+          <div class="data-value" id="val-gender">--</div>
+        </div>
+
+        <div class="data-item">
+          <div class="data-label">🇨🇱 Documento</div>
+          <div class="data-value" id="val-doc-type">e-ID Chileno (ICAO 9303)</div>
+        </div>
+
+        <div class="data-item full-width">
+          <div class="data-label">📋 Cadena MRZ / PDF417 Detectada</div>
+          <div class="data-value mono" id="val-raw" style="font-size: 0.75rem; word-break: break-all; max-height: 80px; overflow-y: auto;">--</div>
+        </div>
+      </div>
+
+      <button id="btn-copy-json" class="btn-copy-json">
+        📋 Copiar Objeto JSON Completo
+      </button>
     </div>
   </div>
 
   <script src="app.js"></script>
 </body>
 </html>
+
