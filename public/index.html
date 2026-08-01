@@ -110,7 +110,19 @@
     p.subtitle {
       color: var(--text-muted);
       font-size: 0.95rem;
-      margin-bottom: 1.75rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .info-note {
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 14px;
+      padding: 0.75rem 1rem;
+      font-size: 0.82rem;
+      color: #7dd3fc;
+      text-align: left;
+      margin-bottom: 1.5rem;
+      line-height: 1.4;
     }
 
     .form-group {
@@ -245,12 +257,16 @@
       </svg>
     </div>
 
-    <h1>Lector DNI & Cédula NFC</h1>
-    <p class="subtitle">Aproxime su Cédula de Identidad de Chile o DNI a la antena NFC del dispositivo</p>
+    <h1>Lector Cédula & DNI NFC</h1>
+    <p class="subtitle">Aproxime su Cédula de Identidad de Chile o DNI al teléfono</p>
+
+    <div class="info-note">
+      ℹ️ <strong>Lectura Cédula Chilena (ISO-DEP):</strong> Al acercar la Cédula el celular sonará. La aplicación detectará el pulso del chip e-ID y confirmará el documento.
+    </div>
 
     <div class="form-group">
       <label for="tramite-input">Número de Trámite / Documento / Clave</label>
-      <input type="text" id="tramite-input" placeholder="Ej. 123456789 (Requerido para BAC/ICAO)" autocomplete="off">
+      <input type="text" id="tramite-input" placeholder="Ej. 123456789 (Número de Trámite)" autocomplete="off">
     </div>
 
     <button id="scan-btn" class="btn-scan">

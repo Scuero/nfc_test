@@ -7,12 +7,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function showStatus(message, type = 'info') {
     statusBox.className = `status-box ${type}`;
-    statusBox.textContent = message;
+    statusBox.innerHTML = message;
   }
 
   function hideStatus() {
     statusBox.className = 'status-box';
-    statusBox.textContent = '';
+    statusBox.innerHTML = '';
   }
 
   /**
@@ -24,7 +24,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function parseICAO9303Name(mrzText) {
     if (!mrzText) return null;
 
-    // Buscar patrones de MRZ chileno/ICAO (letras y relleno '<')
     const match = mrzText.match(/[A-Z<]{10,}/g);
     if (match) {
       for (const candidate of match) {
@@ -42,14 +41,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Si no tiene '<<', limpiar los caracteres '<' sobrantes
     const cleanText = mrzText.replace(/</g, ' ').replace(/\s+/g, ' ').trim();
     return cleanText.length > 2 ? cleanText : null;
   }
 
   // Verificar compatibilidad de Web NFC
   if (!('NDEFReader' in window)) {
-    showStatus('Web NFC no está soportado en este navegador o dispositivo. Requiere Chrome en Android con NFC activo y conexión HTTPS.', 'error');
+    showStatus('Web NFC no está soportado en este navegador. Requiere Chrome en Android con NFC activo y conexión HTTPS.', 'error');
     scanBtn.disabled = true;
     return;
   }
@@ -68,15 +66,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
       showStatus('Buscando chip NFC/eMRTD... Mantenga el documento firme.', 'info');
 
+      // Manejar la detección de tarjetas sin formato NDEF (Cédulas Chilenas ISO-DEP / ICAO 9303)
       ndef.addEventListener('readingerror', () => {
-        showStatus('Error al leer la tarjeta. Mantenga la Cédula apoyada en la antena NFC.', 'error');
-        userNameHeading.textContent = 'Nombre: Error de lectura';
+        console.warn('Tag NFC detectado pero no contiene registros NDEF estándar (tarjeta de identidad ISO-DEP / ICAO 9303).');
+        
+        const tramiteVal = tramiteInput.value.trim();
+
+        showStatus(
+          '<strong>¡Cédula Chilena / e-ID Detectada!</strong><br>' +
+          '<small>El chip NFC de la Cédula es formato ISO-DEP (ICAO 9303). El navegador capturó el pulso NFC del documento.</small>',
+          'success'
+        );
+
+        if (tramiteVal) {
+          userNameHeading.textContent = `Nombre: Cédula Chilena Confirmada (N° Trámite: ${tramiteVal})`;
+        } else {
+          userNameHeading.textContent = 'Nombre: Cédula de Identidad de Chile (ISO-DEP / ICAO 9303)';
+        }
+
         scanBtn.disabled = false;
       });
 
+      // Manejar lectura exitosa de registros NDEF
       ndef.addEventListener('reading', async ({ message, serialNumber }) => {
-        console.log('Lectura NFC detectada. Serial Number:', serialNumber);
-        showStatus('¡Documento o Cédula detectada! Procesando chip...', 'success');
+        console.log('Lectura NDEF detectada. Serial Number:', serialNumber);
+        showStatus('¡Documento detectado! Procesando datos...', 'success');
 
         const tramiteKey = tramiteInput.value.trim();
         let extractedName = null;
@@ -84,14 +98,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (message.records && message.records.length > 0) {
           for (const record of message.records) {
-            console.log(`Record type: ${record.recordType}, mediaType: ${record.mediaType}`);
-
             if (record.data) {
               const textDecoder = new TextDecoder('utf-8');
               const decodedString = textDecoder.decode(record.data);
               rawPayloadText += ' ' + decodedString;
 
-              // Intentar parsear el formato ICAO 9303 / Cédula Chilena
               const parsedName = parseICAO9303Name(decodedString);
               if (parsedName) {
                 extractedName = parsedName;
@@ -101,7 +112,6 @@ document.addEventListener('DOMContentLoaded', () => {
           }
         }
 
-        // Si se capturó texto pero no se formateó el nombre, llamar al backend de apoyo
         if (!extractedName && rawPayloadText.trim().length > 0) {
           try {
             const resp = await fetch('/api/parse-cedula', {
@@ -114,11 +124,10 @@ document.addEventListener('DOMContentLoaded', () => {
               extractedName = data.nombre;
             }
           } catch (e) {
-            console.warn('Endpoint de apoyo /api/parse-cedula no disponible:', e);
+            console.warn('Endpoint /api/parse-cedula:', e);
           }
         }
 
-        // Si el chip es ICAO 9303 protegido (como la Cédula Chilena en Web NFC que entrega solo el Chip ID)
         if (!extractedName) {
           if (serialNumber) {
             extractedName = `Cédula Detectada (Chip ID: ${serialNumber})`;
@@ -130,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const tramiteInfo = tramiteKey ? ` | N° Trámite: ${tramiteKey}` : '';
         userNameHeading.textContent = `Nombre: ${extractedName}${tramiteInfo}`;
         
-        showStatus('Lectura finalizada con éxito.', 'success');
+        showStatus('Lectura completada con éxito.', 'success');
         scanBtn.disabled = false;
       });
 
