@@ -1,0 +1,13 @@
+{
+  "name": "nfc-dni-reader",
+  "version": "1.0.0",
+  "description": "MVP de lectura de DNI mediante Web NFC en Node.js para Cloud Run",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
