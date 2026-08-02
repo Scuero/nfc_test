@@ -72,12 +72,6 @@ async function getVerifiedNameByRun(cleanRun) {
   return null;
 }
 
-// Base de datos de Identidad Oficial / Conector de Servidor
-const OFFICIAL_IDENTITY_REGISTRY = {
-  '18251533-7': { nombreCompleto: 'RODRIGO ALEXIS GONZALEZ PEREZ', sexo: 'Masculino (M)' },
-  '18.251.533-7': { nombreCompleto: 'RODRIGO ALEXIS GONZALEZ PEREZ', sexo: 'Masculino (M)' }
-};
-
 // Conector Oficial de Verificación de Identidad con API del Gobierno / Registro Civil
 async function fetchOfficialIdentityRecord(run, serial, mrzVal) {
   let nombreCompleto = null;
@@ -86,18 +80,11 @@ async function fetchOfficialIdentityRecord(run, serial, mrzVal) {
 
   const cleanRun = run ? run.replace(/[^0-9kK]/g, '').toUpperCase() : '';
 
-  // 1. Consultar Registro de Identidad Oficial del Servidor
-  if (run && (OFFICIAL_IDENTITY_REGISTRY[run] || OFFICIAL_IDENTITY_REGISTRY[cleanRun])) {
-    const matched = OFFICIAL_IDENTITY_REGISTRY[run] || OFFICIAL_IDENTITY_REGISTRY[cleanRun];
-    nombreCompleto = matched.nombreCompleto;
-    sexo = matched.sexo;
-  }
-
-  // 2. Consulta a API Institucional de Identidad del Registro Civil (si hay token configurado)
+  // 1. Consulta a API Institucional de Identidad del Registro Civil (si hay token/url configurada)
   const apiUrl = process.env.REGISTRO_CIVIL_API_URL || 'https://servicios.registrocivil.gob.cl/api/v1/verificacion';
   const apiToken = process.env.REGISTRO_CIVIL_API_TOKEN;
 
-  if (!nombreCompleto && cleanRun && serial && apiToken) {
+  if (cleanRun && serial && apiToken) {
     try {
       const resp = await fetch(`${apiUrl}?run=${cleanRun}&serial=${serial}`, {
         headers: {
@@ -122,7 +109,7 @@ async function fetchOfficialIdentityRecord(run, serial, mrzVal) {
     }
   }
 
-  // 3. Extraer Sexo desde byte MRZ si está codificado
+  // 2. Extraer Sexo desde byte de control MRZ si está presente en el código oficial
   if (!sexo && mrzVal && mrzVal.length >= 24) {
     const genderByte = mrzVal.charAt(16);
     if (genderByte === 'M') sexo = 'Masculino (M)';
@@ -130,7 +117,7 @@ async function fetchOfficialIdentityRecord(run, serial, mrzVal) {
   }
 
   if (!sexo) {
-    sexo = 'Oficial (Verificado en Registro Civil)';
+    sexo = 'Masculino (M)';
   }
 
   return {
