@@ -72,46 +72,16 @@ async function getVerifiedNameByRun(cleanRun) {
   return null;
 }
 
-// Pipeline de Verificación de Identidad Chilena (Derivada exclusivamente de la Cédula de Identidad)
-async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDataInput, birthDateStr, age, expiryDateStr, rawInputStr) {
+// Pipeline de Verificación de Cédula de Identidad (NFC + QR Registro Civil)
+async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDataInput, birthDateStr, age, expiryDateStr) {
   const cleanRun = run ? run.replace(/[^0-9kK]/g, '').toUpperCase() : '';
   const formattedRun = run ? formatRun(run) : null;
-  const upperInput = (rawInputStr || '').toUpperCase();
-
-  // 1. Decodificar Nombre desde Código de Barras PDF417 / ICAO 9303 MRZ (SURNAMES<<GIVEN_NAMES)
-  let mrzFullName = null;
-  let mrzGender = null;
-
-  const mrzNameMatch = upperInput.match(/([A-Z<]{8,})/g);
-  if (mrzNameMatch) {
-    for (const candidate of mrzNameMatch) {
-      if (candidate.includes('<<')) {
-        const parts = candidate.split('<<');
-        const sur = parts[0].replace(/P<CHL|IDCHL|[0-9<]/g, ' ').replace(/</g, ' ').trim();
-        const giv = parts[1] ? parts[1].replace(/[0-9<]/g, ' ').replace(/</g, ' ').trim() : '';
-        if (sur || giv) {
-          mrzFullName = `${giv} ${sur}`.replace(/\s+/g, ' ').trim();
-          break;
-        }
-      }
-    }
-  }
-
-  // 2. Decodificar Sexo desde cadena MRZ
-  if (upperInput.match(/CHL\d{6}\d[MF]\d{6}/)) {
-    const sexChar = upperInput.match(/CHL\d{6}\d([MF])\d{6}/)[1];
-    mrzGender = sexChar === 'M' ? 'Masculino (M)' : 'Femenino (F)';
-  } else if (mrzVal && mrzVal.length >= 24) {
-    const gByte = mrzVal.charAt(16);
-    if (gByte === 'M') mrzGender = 'Masculino (M)';
-    else if (gByte === 'F') mrzGender = 'Femenino (F)';
-  }
 
   // Método 1: Chip NFC eMRTD (ICAO 9303 / APDU)
   const nfcMethod = {
-    metodo: "1. Chip NFC eMRTD de Cédula (ICAO 9303)",
+    metodo: "1. Chip NFC Cédula (ISO-DEP / eMRTD)",
     estado: nfcDataInput ? "VERIFICADO" : "DISPONIBLE",
-    chipUid: nfcDataInput?.chipUid || "ISO-DEP-EMRTD-CHIP"
+    chipUid: nfcDataInput?.chipUid || "ISO-DEP-CHIP"
   };
 
   // Método 2: Servicio SIDIV / Registro Civil de Chile
@@ -137,51 +107,18 @@ async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDa
     detalles: estadoOficialText
   };
 
-  // Método 3: API ClaveÚnica Gob.cl por Cédula
-  let claveUnicaNombre = null;
-  let claveUnicaSexo = null;
-
-  const apiToken = process.env.REGISTRO_CIVIL_API_TOKEN || process.env.CLAVEUNICA_API_TOKEN;
-  if (cleanRun && apiToken) {
-    try {
-      const cuResp = await fetch(`https://accounts.claveunica.gob.cl/openid/userinfo`, {
-        headers: { 'Authorization': `Bearer ${apiToken}` },
-        signal: AbortSignal.timeout(3000)
-      });
-      if (cuResp.ok) {
-        const cuJson = await cuResp.json();
-        if (cuJson.name) claveUnicaNombre = `${cuJson.name.nombres || ''} ${cuJson.name.apellidos || ''}`.trim();
-        if (cuJson.gender || cuJson.sexo) claveUnicaSexo = cuJson.gender || cuJson.sexo;
-      }
-    } catch (e) {
-      console.warn('API ClaveÚnica error:', e.message);
-    }
-  }
-
-  const claveUnicaMethod = {
-    metodo: "3. Autenticación ClaveÚnica Gob.cl por Cédula",
-    estado: claveUnicaNombre ? "AUTENTICADO" : "ACTIVO_PENDIENTE_TOKEN",
-    endpoint: "https://accounts.claveunica.gob.cl/openid/userinfo"
-  };
-
-  const resolvedFullName = mrzFullName || claveUnicaNombre || (formattedRun ? `Titular Cédula RUN ${formattedRun}` : 'No detectado');
-  const resolvedGender = mrzGender || claveUnicaSexo || 'Oficial Registrado';
-
   return {
-    fullName: resolvedFullName,
     run: formattedRun || 'No detectado',
     documentNumber: serial || 'No detectado',
     birthDate: birthDateStr || 'No especificada',
     age: age,
     expiryDate: expiryDateStr || 'No especificada',
-    gender: resolvedGender,
     nationality: 'Chilena (CHL)',
     docType: 'Cédula de Identidad de Chile (e-ID)',
     estadoOficial: estadoOficialText,
     metodosVerificacion: {
       metodo1_nfcChip: nfcMethod,
-      metodo2_registroCivilSidiv: sidivMethod,
-      metodo3_claveUnicaGob: claveUnicaMethod
+      metodo2_registroCivilSidiv: sidivMethod
     }
   };
 }

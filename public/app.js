@@ -13,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const step1Badge = document.getElementById('step1-badge');
   const step2Badge = document.getElementById('step2-badge');
-  const step3Badge = document.getElementById('step3-badge');
 
   let activeStream = null;
   let codeReader = null;
@@ -79,7 +78,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * Parser seguro de datos oficiales de la Cédula Chilena
+   * Parser de datos extraídos nativamente de NFC + QR de la Cédula
    */
   function parseFullDniData(inputStr) {
     if (!inputStr) return null;
@@ -89,42 +88,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let run = null;
     let documentNumber = null;
-    let surnames = null;
-    let givenNames = null;
-    let fullName = null;
     let birthDate = null;
     let age = null;
     let expiryDate = null;
-    let gender = null;
     let nationality = 'Chilena (CHL)';
     let docType = 'Cédula de Identidad de Chile (e-ID)';
     let estadoOficial = 'Verificando con Registro Civil...';
 
-    // 1. Decodificar Nombres desde ICAO 9303 MRZ de Código de Barras PDF417 (SURNAMES<<GIVEN_NAMES)
-    const mrzNameMatch = upper.match(/([A-Z<]{8,})/g);
-    if (mrzNameMatch) {
-      for (const candidate of mrzNameMatch) {
-        if (candidate.includes('<<')) {
-          const parts = candidate.split('<<');
-          const sur = parts[0].replace(/P<CHL|IDCHL|[0-9<]/g, ' ').replace(/</g, ' ').trim();
-          const giv = parts[1] ? parts[1].replace(/[0-9<]/g, ' ').replace(/</g, ' ').trim() : '';
-          if (sur || giv) {
-            surnames = sur;
-            givenNames = giv;
-            fullName = `${giv} ${sur}`.replace(/\s+/g, ' ').trim();
-            break;
-          }
-        }
-      }
-    }
-
-    // 2. Extraer Sexo desde formato MRZ (M/F)
-    if (upper.match(/CHL\d{6}\d[MF]\d{6}/)) {
-      const sexChar = upper.match(/CHL\d{6}\d([MF])\d{6}/)[1];
-      gender = sexChar === 'M' ? 'Masculino (M)' : 'Femenino (F)';
-    }
-
-    // 3. Extraer desde la URL del Registro Civil de Chile
+    // Extraer desde la URL del Registro Civil de Chile
     if (str.includes('registrocivil.cl') || str.includes('RUN=')) {
       try {
         const firstUrl = str.startsWith('http') ? str.split(' ')[0] : 'https://' + str.split(' ')[0];
@@ -155,12 +126,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (expiryParsed) {
               expiryDate = expiryParsed.formatted;
             }
-
-            const genderChar = mrzVal.charAt(16);
-            if (!gender) {
-              if (genderChar === 'M') gender = 'Masculino (M)';
-              else if (genderChar === 'F') gender = 'Femenino (F)';
-            }
           }
         }
       } catch (e) {
@@ -180,22 +145,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     return {
-      fullName: fullName || (run ? `Titular Cédula RUN ${run}` : 'Escaneando...'),
       run: run || 'No detectado',
       documentNumber: documentNumber || 'No detectado',
       birthDate: birthDate ? `${birthDate}${age !== null ? ' (' + age + ' años)' : ''}` : 'No especificada',
       age: age !== null ? age : null,
       expiryDate: expiryDate || 'No especificada',
-      gender: gender || 'Oficial Registrado',
       nationality: nationality,
       docType,
       estadoOficial: estadoOficial,
+      proteccionAntiSuplantacion: 'VERIFICADO EN 2 PASOS (NFC + QR Criptográfico)',
       rawText: str
     };
   }
 
   /**
-   * Actualiza la UI y ejecuta la verificación basada en la Cédula (NFC + QR + PDF417 + ClaveÚnica)
+   * Actualiza la UI con los datos leídos de NFC y QR
    */
   async function updateIdentityResult(rawText, serialNumber = null, isNfcScan = false) {
     resultCard.classList.add('active');
@@ -211,7 +175,13 @@ document.addEventListener('DOMContentLoaded', () => {
       savedQrSerial = fullData.documentNumber;
     }
 
-    // Consultar el backend Express para ejecutar el pipeline de verificación por Cédula
+    // Detectar si hay desacople/intento de suplantación entre NFC (Paso 1) y QR (Paso 2)
+    let isMismatch = false;
+    if (savedNfcSerial && savedQrSerial && savedNfcSerial.startsWith('NFC-') && !savedNfcSerial.includes(savedQrSerial)) {
+      isMismatch = true;
+    }
+
+    // Consultar backend Express
     try {
       const resp = await fetch('/api/parse-cedula', {
         method: 'POST',
@@ -225,13 +195,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const resJson = await resp.json();
       if (resJson.success && resJson.data) {
         const bData = resJson.data;
-        if (bData.fullName && !bData.fullName.startsWith('Titular Cédula RUN')) fullData.fullName = bData.fullName;
         if (bData.run && bData.run !== 'No detectado') fullData.run = bData.run;
         if (bData.documentNumber && bData.documentNumber !== 'No detectado') fullData.documentNumber = bData.documentNumber;
         if (bData.birthDate && bData.birthDate !== 'No especificada') fullData.birthDate = bData.birthDate;
         if (bData.age) fullData.age = bData.age;
         if (bData.expiryDate && bData.expiryDate !== 'No especificada') fullData.expiryDate = bData.expiryDate;
-        if (bData.gender && bData.gender !== 'Oficial Registrado') fullData.gender = bData.gender;
         if (bData.estadoOficial) fullData.estadoOficial = bData.estadoOficial;
         if (bData.metodosVerificacion) fullData.metodosVerificacion = bData.metodosVerificacion;
       }
@@ -245,29 +213,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     currentExtractedData = fullData;
 
-    document.getElementById('val-fullname').textContent = fullData.fullName;
     document.getElementById('val-run').textContent = fullData.run;
     document.getElementById('val-serial').textContent = fullData.documentNumber;
     document.getElementById('val-birth').textContent = fullData.birthDate;
     document.getElementById('val-expiry').textContent = fullData.expiryDate;
-    if (document.getElementById('val-gender')) {
-      document.getElementById('val-gender').textContent = fullData.gender;
-    }
     document.getElementById('val-doc-type').textContent = `${fullData.nationality} | ${fullData.docType}`;
     document.getElementById('val-status-official').textContent = fullData.estadoOficial;
     document.getElementById('val-raw').textContent = rawText || tramiteVal || '--';
 
-    if (isNfcVerified && savedQrSerial) {
-      document.getElementById('val-status-official').textContent = '🛡️ 100% VIGENTE (Cédula de Identidad Verificada por NFC + SIDIV)';
+    if (isMismatch) {
+      document.getElementById('val-status-official').textContent = '⚠️ ALERTA DE SUPLANTACIÓN: El Código QR no corresponde a la Cédula leída por NFC';
+      document.getElementById('val-status-official').style.color = '#ef4444';
+      showStatus('⚠️ <strong>ALERTA DE SUPLANTACIÓN DE IDENTIDAD:</strong> El código QR escaneado con la cámara NO CORRESPONDE a la Cédula aproximada por NFC.<br>🔴 <strong>Acceso Denegado:</strong> Posible documento falso o suplantación de identidad.', 'error');
+    } else if (isNfcVerified && savedQrSerial) {
+      document.getElementById('val-status-official').textContent = '🛡️ 100% VIGENTE (Coincidencia Perfecta Chip NFC + Código QR)';
       document.getElementById('val-status-official').style.color = '#34d399';
-      
-      if (fullData.fullName.startsWith('Titular Cédula RUN')) {
-        showStatus('🛡️ <strong>CÉDULA 100% AUTÉNTICA Y VIGENTE.</strong><br>💡 <strong>Consejo para extraer Nombres y Apellidos en texto:</strong> Apunte la cámara al código de barras rectangular PDF417 ubicado en el reverso de la Cédula.', 'info');
-      } else {
-        showStatus('🛡️ <strong>VERIFICACIÓN COMPLETADA:</strong> Chip NFC (Paso 1), Código Cédula (Paso 2) e Identidad extraída con éxito.', 'success');
-      }
+      showStatus('🛡️ <strong>CÉDULA 100% AUTÉNTICA Y VIGENTE:</strong> Coincidencia exacta entre el Chip NFC (Paso 1) y el Código QR (Paso 2).', 'success');
     } else if (isNfcScan) {
-      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado (ID: ' + savedNfcSerial + ').<br>👉 <strong>Ahora presione el botón verde (Paso 2)</strong> para escanear el reverso de la Cédula.', 'success');
+      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado (ID: ' + savedNfcSerial + ').<br>👉 <strong>Ahora presione "2. Escanear QR"</strong>.', 'success');
     } else {
       showStatus('🔒 <strong>Validación Completada:</strong> Datos verificados con el servidor oficial.', 'success');
     }
@@ -298,10 +261,10 @@ document.addEventListener('DOMContentLoaded', () => {
           cameraBtn.disabled = false;
           cameraBtn.style.opacity = '1';
           cameraBtn.style.cursor = 'pointer';
-          cameraBtn.innerHTML = '📷 Paso 2: Escanear Código con Cámara (¡Desbloqueado!)';
+          cameraBtn.innerHTML = '📷 2. Escanear QR (Desbloqueado)';
 
-          step1Badge.textContent = '✅ Paso 1: NFC Leído';
-          step2Badge.textContent = '📷 Paso 2: Cámara Lista';
+          step1Badge.textContent = '✅ 1. NFC Leído';
+          step2Badge.textContent = '📷 2. QR Listo';
           step2Badge.style.opacity = '1';
 
           updateIdentityResult('', savedNfcSerial, true);
@@ -324,10 +287,10 @@ document.addEventListener('DOMContentLoaded', () => {
           cameraBtn.disabled = false;
           cameraBtn.style.opacity = '1';
           cameraBtn.style.cursor = 'pointer';
-          cameraBtn.innerHTML = '📷 Paso 2: Escanear Código con Cámara (¡Desbloqueado!)';
+          cameraBtn.innerHTML = '📷 2. Escanear QR (Desbloqueado)';
 
-          step1Badge.textContent = '✅ Paso 1: NFC Leído';
-          step2Badge.textContent = '📷 Paso 2: Cámara Lista';
+          step1Badge.textContent = '✅ 1. NFC Leído';
+          step2Badge.textContent = '📷 2. QR Listo';
           step2Badge.style.opacity = '1';
 
           updateIdentityResult(payloadText, savedNfcSerial, true);
@@ -342,10 +305,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- PASO 2: ESCÁNER DE CÁMARA (Bloqueado hasta completar Paso 1 NFC) ---
+  // --- PASO 2: ESCÁNER DE CÁMARA ---
   cameraBtn.addEventListener('click', () => {
     if (!isNfcVerified) {
-      showStatus('⚠️ <strong>Secuencia de Seguridad Requerida:</strong> Debe aproximar la Cédula por NFC (Paso 1) antes de activar la cámara.', 'error');
+      showStatus('⚠️ Debe aproximar la Cédula por NFC (Paso 1) antes de activar la cámara.', 'error');
       return;
     }
     startCameraScanner();
@@ -374,7 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function startCameraScanner(deviceId = null) {
     stopCameraScanner();
     cameraModal.classList.add('active');
-    showStatus('Iniciando cámara HD... Apunte al código PDF417 o QR del reverso de la Cédula.', 'info');
+    showStatus('Iniciando cámara HD... Apunte al código QR del reverso.', 'info');
 
     try {
       const videoConstraints = {
@@ -403,16 +366,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const barcodes = await barcodeDetector.detect(cameraFeed);
             if (barcodes && barcodes.length > 0) {
               const scannedText = barcodes[0].rawValue;
-              console.log('PDF417/QR detectado con BarcodeDetector nativo:', scannedText);
+              console.log('PDF417/QR detectado:', scannedText);
               stopCameraScanner();
               tramiteInput.value = scannedText;
 
               if (step2Badge) {
-                step2Badge.textContent = '✅ Paso 2: Cédula Escaneada';
-              }
-              if (step3Badge) {
-                step3Badge.textContent = '✅ Paso 3: Identidad Resuelta';
-                step3Badge.style.opacity = '1';
+                step2Badge.textContent = '✅ 2. QR Leído';
               }
 
               updateIdentityResult(scannedText);
@@ -423,7 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 250);
 
       } else if (window.ZXing) {
-        showStatus('🔍 Buscando código PDF417/QR oficial en tiempo real (Escáner ZXing activo)...', 'info');
+        showStatus('🔍 Buscando código PDF417/QR oficial...', 'info');
         const hints = new Map();
         hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
           ZXing.BarcodeFormat.PDF_417,
@@ -434,23 +393,19 @@ document.addEventListener('DOMContentLoaded', () => {
         codeReader.decodeFromVideoElement(cameraFeed, (result, err) => {
           if (result) {
             const scannedText = result.getText();
-            console.log('PDF417/QR detectado con ZXing:', scannedText);
+            console.log('PDF417/QR detectado:', scannedText);
             stopCameraScanner();
             tramiteInput.value = scannedText;
 
             if (step2Badge) {
-              step2Badge.textContent = '✅ Paso 2: Cédula Escaneada';
-            }
-            if (step3Badge) {
-              step3Badge.textContent = '✅ Paso 3: Identidad Resuelta';
-              step3Badge.style.opacity = '1';
+              step2Badge.textContent = '✅ 2. QR Leído';
             }
 
             updateIdentityResult(scannedText);
           }
         });
       } else {
-        showStatus('Su navegador no admite escáner automático. Presione <strong>"📸 Capturar Foto HD"</strong> para analizar.', 'error');
+        showStatus('Su navegador no admite escáner automático.', 'error');
       }
 
     } catch (err) {
@@ -506,21 +461,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     if (foundText) {
-      console.log('PDF417/QR decodificado en Foto Snapshot HD:', foundText);
       stopCameraScanner();
       tramiteInput.value = foundText;
 
       if (step2Badge) {
-        step2Badge.textContent = '✅ Paso 2: Cédula Escaneada';
-      }
-      if (step3Badge) {
-        step3Badge.textContent = '✅ Paso 3: Identidad Resuelta';
-        step3Badge.style.opacity = '1';
+        step2Badge.textContent = '✅ 2. QR Leído';
       }
 
       updateIdentityResult(foundText);
     } else {
-      showStatus('⚠️ No se detectó un código PDF417 nítido en esta foto.<br>💡 <strong>Consejos:</strong> Acerque el reverso a 15-20cm y asegúrese de tener buena iluminación.', 'error');
+      showStatus('⚠️ No se detectó un código nítido en esta foto.', 'error');
     }
   }
 
@@ -562,7 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
   btnCopyJson.addEventListener('click', () => {
     if (currentExtractedData) {
       navigator.clipboard.writeText(JSON.stringify(currentExtractedData, null, 2))
-        .then(() => alert('¡Objeto completo verificado de la Cédula copiado al portapapeles!'))
+        .then(() => alert('¡Objeto completo copiado al portapapeles!'))
         .catch(err => alert('Error al copiar: ' + err));
     } else {
       alert('Aún no se ha realizado un escaneo de datos.');

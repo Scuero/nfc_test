@@ -485,9 +485,8 @@
 
   <div class="container">
     <div class="badges">
-      <span class="badge" id="step1-badge">📶 Paso 1: NFC Pendiente</span>
-      <span class="badge" id="step2-badge" style="opacity: 0.5;">🔒 Paso 2: Cámara Bloqueada</span>
-      <span class="badge" id="step3-badge" style="opacity: 0.5;">🔑 Paso 3: ClaveÚnica Automática</span>
+      <span class="badge" id="step1-badge">📶 1. NFC Pendiente</span>
+      <span class="badge" id="step2-badge" style="opacity: 0.5;">🔒 2. QR Bloqueado</span>
       <span class="badge">🇨🇱 Cédula Chilena</span>
     </div>
 
@@ -498,22 +497,19 @@
     </div>
 
     <h1>Lector Cédula & DNI</h1>
-    <p class="subtitle">Verificación Automática de 3 Pasos: NFC (1) ➔ QR Cámara (2) ➔ ClaveÚnica Gob.cl (3)</p>
+    <p class="subtitle">Verificación Secuencial de Seguridad: NFC (Paso 1) ➔ Cámara QR (Paso 2)</p>
 
     <div class="info-note">
-      ℹ️ <strong>Flujo de Seguridad Automático:</strong> Aproxime su Cédula a la antena NFC <strong>(Paso 1)</strong>. Al detectar el chip, escanee el código QR <strong>(Paso 2)</strong> y la aplicación consultará automáticamente <strong>(Paso 3)</strong> los Nombres, Apellidos y Sexo con ClaveÚnica Gob.cl.
+      ℹ️ Aproxime la Cédula por NFC <strong>(Paso 1)</strong> para desbloquear la lectura de cámara <strong>(Paso 2)</strong>.
     </div>
 
-    <div class="button-group">
-      <button id="scan-btn" class="btn-scan">
-        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-        📶 Paso 1: Aproxime Cédula por NFC
+    <div class="button-group" style="display: flex; gap: 0.5rem;">
+      <button id="scan-btn" class="btn-scan" style="padding: 0.65rem 1rem; font-size: 0.88rem; flex: 1;">
+        📶 1. Leer NFC
       </button>
 
-      <button id="camera-btn" class="btn-camera" disabled style="opacity: 0.5; cursor: not-allowed;">
-        🔒 Paso 2: Escanear Código con Cámara (Bloqueado)
+      <button id="camera-btn" class="btn-camera" disabled style="padding: 0.65rem 1rem; font-size: 0.88rem; flex: 1; opacity: 0.5; cursor: not-allowed;">
+        🔒 2. Escanear QR
       </button>
     </div>
 
@@ -527,72 +523,63 @@
       </div>
       <div class="camera-controls">
         <select id="camera-select" class="camera-select" title="Seleccionar Cámara"></select>
-        <button id="btn-snap-hd" class="btn-snap-hd">📸 Capturar Foto HD</button>
+        <button id="btn-snap-hd" class="btn-snap-hd" style="padding: 0.5rem 0.85rem; font-size: 0.85rem;">📸 Foto HD</button>
       </div>
     </div>
 
-    <div class="form-group" style="margin-top: 1.25rem;">
-      <label for="tramite-input">Datos Escaneados / Línea MRZ / N° Trámite</label>
-      <input type="text" id="tramite-input" placeholder="Los datos escaneados se cargarán aquí automáticamente..." autocomplete="off">
+    <div class="form-group" style="margin-top: 1rem;">
+      <label for="tramite-input">Datos Escaneados Cédula</label>
+      <input type="text" id="tramite-input" placeholder="Los datos escaneados se cargarán automáticamente..." autocomplete="off">
     </div>
 
     <div id="status-box" class="status-box"></div>
 
-    <!-- Tarjetero de Resultados Detallado -->
+    <!-- Tarjetero de Resultados Limpio -->
     <div class="result-card" id="result-card">
       <div class="result-header">
-        <h2 id="card-title">🪪 Datos de Cédula Detectados</h2>
+        <h2 id="card-title">🪪 Datos de Cédula Autenticados</h2>
         <span class="result-badge" id="card-status-badge">Verificado</span>
       </div>
 
-        <div class="data-item full-width">
-          <div class="data-label">👤 Nombre Completo (Verificación Oficial API Gov)</div>
-          <div class="data-value highlight" id="val-fullname">Verificando en Base de Datos de Identidad...</div>
-        </div>
-
+      <div class="data-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
         <div class="data-item">
           <div class="data-label">🪪 RUN / RUT</div>
           <div class="data-value mono" id="val-run">--</div>
         </div>
 
         <div class="data-item">
-          <div class="data-label">📄 N° de Trámite / Serial</div>
+          <div class="data-label">📄 N° Trámite / Serial</div>
           <div class="data-value mono" id="val-serial">--</div>
         </div>
 
         <div class="data-item">
-          <div class="data-label">🎂 Fecha Nacimiento / Edad</div>
+          <div class="data-label">🎂 Fecha Nacimiento</div>
           <div class="data-value" id="val-birth">--</div>
         </div>
 
         <div class="data-item">
-          <div class="data-label">📅 Vencimiento Documento</div>
+          <div class="data-label">📅 Vencimiento Cédula</div>
           <div class="data-value" id="val-expiry">--</div>
         </div>
 
-        <div class="data-item">
-          <div class="data-label">🚻 Sexo (Oficial Registrado)</div>
-          <div class="data-value" id="val-gender">--</div>
-        </div>
-
-        <div class="data-item">
-          <div class="data-label">🇨🇱 Nacionalidad / Documento</div>
+        <div class="data-item full-width" style="grid-column: span 2;">
+          <div class="data-label">🇨🇱 Documento & Nacionalidad</div>
           <div class="data-value" id="val-doc-type">Chilena (CHL) | e-ID Oficial</div>
         </div>
 
-        <div class="data-item full-width">
-          <div class="data-label">🔒 Validación Anti-Suplantación & Estado Oficial</div>
-          <div class="data-value highlight" id="val-status-official" style="color: #34d399; font-size: 0.9rem;">Verificando vigencia con Registro Civil de Chile...</div>
+        <div class="data-item full-width" style="grid-column: span 2;">
+          <div class="data-label">🛡️ Estado de Vigencia Oficial</div>
+          <div class="data-value highlight" id="val-status-official" style="color: #34d399; font-size: 0.88rem;">Verificando vigencia en Registro Civil...</div>
         </div>
 
-        <div class="data-item full-width">
-          <div class="data-label">📋 Cadena QR / PDF417 Oficial</div>
-          <div class="data-value mono" id="val-raw" style="font-size: 0.75rem; word-break: break-all; max-height: 80px; overflow-y: auto;">--</div>
+        <div class="data-item full-width" style="grid-column: span 2;">
+          <div class="data-label">📋 Raw Escaneado</div>
+          <div class="data-value mono" id="val-raw" style="font-size: 0.72rem; word-break: break-all; max-height: 60px; overflow-y: auto;">--</div>
         </div>
       </div>
 
-      <button id="btn-copy-json" class="btn-copy-json" style="margin-top: 1rem;">
-        📋 Copiar Objeto JSON Verificado
+      <button id="btn-copy-json" class="btn-copy-json" style="margin-top: 0.85rem; padding: 0.6rem; font-size: 0.85rem;">
+        📋 Copiar JSON Autenticado
       </button>
     </div>
   </div>
