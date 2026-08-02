@@ -26,12 +26,22 @@ document.addEventListener('DOMContentLoaded', () => {
     statusBox.innerHTML = '';
   }
 
+  // Formateador preciso de RUN chileno sin alterar dígitos
   function formatRun(raw) {
     if (!raw) return null;
-    const clean = raw.replace(/[^0-9kK]/g, '').toUpperCase();
-    if (clean.length < 8) return clean;
-    const body = clean.slice(0, -1);
-    const dv = clean.slice(-1);
+    let body = '';
+    let dv = '';
+    if (raw.includes('-')) {
+      const parts = raw.split('-');
+      body = parts[0].replace(/[^0-9]/g, '');
+      dv = parts[1].replace(/[^0-9kK]/g, '').toUpperCase();
+    } else {
+      const clean = raw.replace(/[^0-9kK]/g, '').toUpperCase();
+      if (clean.length < 8) return clean;
+      body = clean.slice(0, -1);
+      dv = clean.slice(-1);
+    }
+    if (!body) return raw;
     const formattedBody = body.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
     return `${formattedBody}-${dv}`;
   }
@@ -44,12 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
     const currentYear = new Date().getFullYear();
-    let century = 2000;
-    if (isBirth) {
-      century = (yy > (currentYear % 100)) ? 1900 : 2000;
-    } else {
-      century = (yy < 50) ? 2000 : 1900;
-    }
+    let century = isBirth ? ((yy > (currentYear % 100)) ? 1900 : 2000) : ((yy < 50) ? 2000 : 1900);
     const fullYear = century + yy;
     const dateObj = new Date(fullYear, mm - 1, dd);
     const today = new Date();
@@ -65,13 +70,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * Parser exhaustivo de datos de la Cédula Chilena y DNI ICAO 9303
+   * Parser exhaustivo de datos de la Cédula Chilena y URL del Registro Civil
    */
   function parseFullDniData(inputStr) {
     if (!inputStr) return null;
 
     const str = inputStr.trim();
-    const upper = str.toUpperCase().replace(/\s+/g, ' ');
+    const upper = str.toUpperCase();
 
     let run = null;
     let documentNumber = null;
@@ -85,21 +90,47 @@ document.addEventListener('DOMContentLoaded', () => {
     let nationality = 'Chile (CHL)';
     let docType = 'Cédula de Identidad de Chile (e-ID)';
 
-    // 1. Extraer si es URL de Registro Civil
-    if (str.includes('registrocivil.gob.cl') || str.includes('?')) {
+    // 1. Decodificar desde URL oficial del Registro Civil de Chile
+    // Ejemplo: https://portal.sidiv.registrocivil.cl/docstatus?RUN=18251533-7&type=CEDULA&serial=529831745&mrz=529831745292091833209181
+    if (str.includes('registrocivil.cl') || str.includes('RUN=')) {
       try {
-        const urlObj = new URL(str.startsWith('http') ? str : 'https://' + str);
+        const firstUrl = str.startsWith('http') ? str.split(' ')[0] : 'https://' + str.split(' ')[0];
+        const urlObj = new URL(firstUrl);
         const params = new URLSearchParams(urlObj.search);
-        if (params.has('run')) run = formatRun(params.get('run'));
-        if (params.has('serial') || params.has('tramite') || params.has('v')) {
-          documentNumber = params.get('serial') || params.get('tramite') || params.get('v');
+        
+        if (params.has('RUN')) {
+          run = formatRun(params.get('RUN'));
+        }
+        if (params.has('serial')) {
+          documentNumber = params.get('serial');
+        }
+        
+        // Decodificar el parámetro MRZ de 24 dígitos de la Cédula Chilena
+        // mrz = [SERIAL (9)] + [CHECK (1)] + [BIRTH_YYMMDD (6)] + [CHECK (1)] + [EXPIRY_YYMMDD (6)] + [CHECK (1)]
+        if (params.has('mrz')) {
+          const mrzVal = params.get('mrz');
+          if (mrzVal.length >= 24) {
+            const birthRaw = mrzVal.substring(10, 16);
+            const expiryRaw = mrzVal.substring(17, 23);
+
+            const birthParsed = parseYYMMDD(birthRaw, true);
+            if (birthParsed) {
+              birthDate = birthParsed.formatted;
+              age = birthParsed.age;
+            }
+
+            const expiryParsed = parseYYMMDD(expiryRaw, false);
+            if (expiryParsed) {
+              expiryDate = expiryParsed.formatted;
+            }
+          }
         }
       } catch (e) {
-        console.log('Error URL parse:', e);
+        console.warn('Error al decodificar URL Registro Civil:', e);
       }
     }
 
-    // 2. Extraer Nombre ICAO (SURNAMES<<GIVEN_NAMES)
+    // 2. Extraer Nombre ICAO MRZ (ej: GONZALEZ<PEREZ<<JUAN<CARLOS)
     const nameMatches = upper.match(/([A-Z<]{8,})/g);
     if (nameMatches) {
       for (const cand of nameMatches) {
@@ -117,19 +148,23 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // 3. Extraer N° de Trámite / Serial del documento
-    const serialMatch = upper.match(/IDCHL([A-Z0-9]{8,12})/i) || upper.match(/\b(50\d{7,8}|A\d{8,9}|\d{9,10})\b/);
-    if (serialMatch && !documentNumber) {
-      documentNumber = serialMatch[1].replace(/</g, '');
+    // 3. Fallback N° de Trámite
+    if (!documentNumber) {
+      const serialMatch = upper.match(/IDCHL([A-Z0-9]{8,12})/i) || upper.match(/\b(50\d{7,8}|5\d{8}|A\d{8,9}|\d{9,10})\b/);
+      if (serialMatch) {
+        documentNumber = serialMatch[1].replace(/</g, '');
+      }
     }
 
-    // 4. Extraer RUN / RUT
-    const runMatch = upper.match(/\b(\d{7,8}[-kK0-9])\b/) || upper.match(/CHL(\d{7,8}[K0-9])/);
-    if (runMatch && !run) {
-      run = formatRun(runMatch[1]);
+    // 4. Fallback RUN
+    if (!run) {
+      const runMatch = upper.match(/RUN[=:]?\s*(\d{7,8}-?[Kk0-9])/i) || upper.match(/\b(\d{7,8}-?[Kk0-9])\b/);
+      if (runMatch) {
+        run = formatRun(runMatch[1]);
+      }
     }
 
-    // 5. Extraer Sexo (M / F)
+    // 5. Fallback Sexo
     if (upper.match(/\bCHL\d{6}\d[MF]\d{6}/)) {
       const sexChar = upper.match(/\bCHL\d{6}\d([MF])\d{6}/)[1];
       gender = sexChar === 'M' ? 'Masculino (M)' : 'Femenino (F)';
@@ -139,40 +174,27 @@ document.addEventListener('DOMContentLoaded', () => {
       gender = 'Femenino (F)';
     }
 
-    // 6. Extraer Fechas de Nacimiento y Vencimiento desde pares MRZ (YYMMDD + Sex + YYMMDD)
-    const mrzDatePair = upper.match(/\b(\d{6})\d[MF](\d{6})\b/);
-    if (mrzDatePair) {
-      const birthParsed = parseYYMMDD(mrzDatePair[1], true);
-      if (birthParsed) {
-        birthDate = birthParsed.formatted;
-        age = birthParsed.age;
-      }
-      const expiryParsed = parseYYMMDD(mrzDatePair[2], false);
-      if (expiryParsed) {
-        expiryDate = expiryParsed.formatted;
-      }
-    }
-
-    // Si no se extrajeron por par MRZ, buscar fechas sueltas de 6 dígitos
+    // 6. Fallback Fechas desde par MRZ
     if (!birthDate) {
-      const dates = upper.match(/\b(\d{6})\b/g);
-      if (dates && dates.length > 0) {
-        for (const d of dates) {
-          const parsed = parseYYMMDD(d, true);
-          if (parsed && parsed.age >= 0 && parsed.age <= 120) {
-            birthDate = parsed.formatted;
-            age = parsed.age;
-            break;
-          }
+      const mrzDatePair = upper.match(/\b(\d{6})\d[MF](\d{6})\b/);
+      if (mrzDatePair) {
+        const birthParsed = parseYYMMDD(mrzDatePair[1], true);
+        if (birthParsed) {
+          birthDate = birthParsed.formatted;
+          age = birthParsed.age;
+        }
+        const expiryParsed = parseYYMMDD(mrzDatePair[2], false);
+        if (expiryParsed) {
+          expiryDate = expiryParsed.formatted;
         }
       }
     }
 
     return {
-      fullName: fullName || 'No especificado en lectura',
+      fullName: fullName || (run ? `Titular RUN ${run}` : 'No especificado en código'),
       givenNames: givenNames || '--',
       surnames: surnames || '--',
-      run: run || 'No detectado en PDF417/MRZ',
+      run: run || 'No detectado',
       documentNumber: documentNumber || 'No detectado',
       birthDate: birthDate ? `${birthDate}${age !== null ? ' (' + age + ' años)' : ''}` : 'No especificada',
       age: age !== null ? age : null,
@@ -193,7 +215,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let fullData = parseFullDniData((rawText || '') + ' ' + tramiteVal);
 
-    if (!fullData || fullData.fullName === 'No especificado en lectura' || fullData.run === 'No detectado en PDF417/MRZ') {
+    if (!fullData || fullData.fullName === 'No especificado en código' || fullData.run === 'No detectado' || fullData.birthDate === 'No especificada') {
       try {
         const resp = await fetch('/api/parse-cedula', {
           method: 'POST',
@@ -232,10 +254,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('val-doc-type').textContent = fullData.docType;
     document.getElementById('val-raw').textContent = rawText || tramiteVal || '--';
 
-    if (isNfcScan && (fullData.fullName === 'No especificado en lectura' || fullData.run === 'No detectado en PDF417/MRZ')) {
+    if (isNfcScan && (fullData.fullName.includes('Titular RUN') || fullData.run === 'No detectado')) {
       showStatus('⚠️ <strong>Chip NFC verificado</strong>. Las Cédulas Chilenas usan un chip cifrado eMRTD.<br>💡 <strong>Para extraer RUN, N° de Trámite, Nombre y Edad:</strong> Use el botón verde <strong>"📷 Escanear Código PDF417 / MRZ con Cámara"</strong> enfocando el reverso.', 'info');
     } else {
-      showStatus('✅ <strong>¡Datos de la Cédula extraídos correctamente!</strong>', 'success');
+      showStatus('✅ <strong>¡Datos de la Cédula decodificados exitosamente desde el Registro Civil!</strong>', 'success');
     }
   }
 
@@ -284,7 +306,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       await populateCameraDevices();
 
-      // INTENTO 1: BarcodeDetector Nativo de Chromium (MLKit - Ultrarrápido para PDF417 en Android)
       if ('BarcodeDetector' in window) {
         showStatus('🔍 Buscando código PDF417 en tiempo real (Escáner Nativo activo)...', 'info');
         const barcodeDetector = new BarcodeDetector({ formats: ['pdf417', 'qr_code', 'code_128'] });
@@ -305,7 +326,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 250);
 
       } else if (window.ZXing) {
-        // INTENTO 2: ZXing Browser MultiFormat Reader con Hints de PDF417
         showStatus('🔍 Buscando código PDF417 en tiempo real (Escáner ZXing activo)...', 'info');
         const hints = new Map();
         hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
@@ -350,7 +370,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let foundText = null;
 
-    // 1. Probar con BarcodeDetector sobre la imagen HD
     if ('BarcodeDetector' in window) {
       try {
         const detector = new BarcodeDetector({ formats: ['pdf417', 'qr_code', 'code_128'] });
@@ -363,7 +382,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // 2. Probar con ZXing sobre el canvas HD
     if (!foundText && window.ZXing) {
       try {
         const hints = new Map();
