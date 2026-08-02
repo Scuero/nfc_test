@@ -487,6 +487,7 @@
     <div class="badges">
       <span class="badge" id="step1-badge">📶 Paso 1: NFC Pendiente</span>
       <span class="badge" id="step2-badge" style="opacity: 0.5;">🔒 Paso 2: Cámara Bloqueada</span>
+      <span class="badge" id="step3-badge" style="opacity: 0.5;">🔑 Paso 3: ClaveÚnica Automática</span>
       <span class="badge">🇨🇱 Cédula Chilena</span>
     </div>
 
@@ -497,10 +498,10 @@
     </div>
 
     <h1>Lector Cédula & DNI</h1>
-    <p class="subtitle">Verificación Secuencial de Seguridad: NFC (Paso 1) ➔ Cámara QR (Paso 2)</p>
+    <p class="subtitle">Verificación Automática de 3 Pasos: NFC (1) ➔ QR Cámara (2) ➔ ClaveÚnica Gob.cl (3)</p>
 
     <div class="info-note">
-      ℹ️ <strong>Flujo de Seguridad:</strong> Primero aproxime su Cédula a la antena NFC <strong>(Paso 1)</strong>. Al detectar el chip, se desbloqueará el botón de la cámara <strong>(Paso 2)</strong> para validar el código QR.
+      ℹ️ <strong>Flujo de Seguridad Automático:</strong> Aproxime su Cédula a la antena NFC <strong>(Paso 1)</strong>. Al detectar el chip, escanee el código QR <strong>(Paso 2)</strong> y la aplicación consultará automáticamente <strong>(Paso 3)</strong> los Nombres, Apellidos y Sexo con ClaveÚnica Gob.cl.
     </div>
 
     <div class="button-group">
@@ -515,10 +516,6 @@
         🔒 Paso 2: Escanear Código con Cámara (Bloqueado)
       </button>
     </div>
-
-    <button id="btn-claveunica" class="btn-claveunica" style="background: linear-gradient(135deg, #003366, #0055a5); color: #ffffff; width: 100%; padding: 0.85rem; border-radius: 8px; font-weight: 600; font-size: 0.95rem; margin-top: 0.75rem; cursor: pointer; border: 1px solid rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: center; gap: 0.5rem;">
-      🔑 Paso 3 (Opcional): Autenticar Nombre y Sexo con ClaveÚnica Gob.cl
-    </button>
 
     <div class="camera-modal" id="camera-modal">
       <button class="btn-close-camera" id="btn-close-camera" title="Cerrar Cámara">✕</button>

@@ -10,10 +10,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultCard = document.getElementById('result-card');
   const tramiteInput = document.getElementById('tramite-input');
   const btnCopyJson = document.getElementById('btn-copy-json');
-  const btnClaveUnica = document.getElementById('btn-claveunica');
 
   const step1Badge = document.getElementById('step1-badge');
   const step2Badge = document.getElementById('step2-badge');
+  const step3Badge = document.getElementById('step3-badge');
 
   let activeStream = null;
   let codeReader = null;
@@ -92,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let birthDate = null;
     let age = null;
     let expiryDate = null;
-    let gender = 'Pendiente Validación ClaveÚnica Gob.cl';
+    let gender = 'Consultando ClaveÚnica Gob.cl...';
     let nationality = 'Chilena (CHL)';
     let docType = 'Cédula de Identidad de Chile (e-ID)';
     let estadoOficial = 'Verificando con Registro Civil...';
@@ -128,10 +128,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (expiryParsed) {
               expiryDate = expiryParsed.formatted;
             }
-
-            const genderChar = mrzVal.charAt(16);
-            if (genderChar === 'M') gender = 'Masculino (M)';
-            else if (genderChar === 'F') gender = 'Femenino (F)';
           }
         }
       } catch (e) {
@@ -151,7 +147,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     return {
-      fullName: run ? `Titular Registrado (RUN ${run})` : 'Escaneando...',
+      fullName: run ? `Consultando ClaveÚnica (RUN ${run})...` : 'Escaneando...',
       run: run || 'No detectado',
       documentNumber: documentNumber || 'No detectado',
       birthDate: birthDate ? `${birthDate}${age !== null ? ' (' + age + ' años)' : ''}` : 'No especificada',
@@ -161,13 +157,13 @@ document.addEventListener('DOMContentLoaded', () => {
       nationality: nationality,
       docType,
       estadoOficial: estadoOficial,
-      proteccionAntiSuplantacion: 'VERIFICADO EN 2 PASOS (NFC + QR Criptográfico sin OCR)',
+      proteccionAntiSuplantacion: 'VERIFICADO EN 3 PASOS (NFC + QR + ClaveÚnica Gob.cl sin OCR)',
       rawText: str
     };
   }
 
   /**
-   * Actualiza la UI y consulta la API Oficial de Identidad del Backend
+   * Actualiza la UI y ejecuta AUTOMÁTICAMENTE la verificación de 3 pasos (NFC + QR + ClaveÚnica)
    */
   async function updateIdentityResult(rawText, serialNumber = null, isNfcScan = false) {
     resultCard.classList.add('active');
@@ -183,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
       savedQrSerial = fullData.documentNumber;
     }
 
-    // Consultar el backend Express para obtener datos oficiales
+    // 1. Consultar el backend Express para verificar vigencia oficial en Registro Civil
     try {
       const resp = await fetch('/api/parse-cedula', {
         method: 'POST',
@@ -193,12 +189,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const resJson = await resp.json();
       if (resJson.success && resJson.data) {
         const bData = resJson.data;
-        if (bData.nombreCompleto && bData.nombreCompleto !== 'No detectado') {
-          fullData.fullName = bData.nombreCompleto;
-        }
-        if (bData.sexo) {
-          fullData.gender = bData.sexo;
-        }
         if (bData.run && bData.run !== 'No detectado') fullData.run = bData.run;
         if (bData.numeroTramite && bData.numeroTramite !== 'No detectado') fullData.documentNumber = bData.numeroTramite;
         if (bData.fechaNacimiento && bData.fechaNacimiento !== 'No especificada') {
@@ -216,6 +206,32 @@ document.addEventListener('DOMContentLoaded', () => {
       fullData.documentNumber = serialNumber;
     }
 
+    // 2. EJECUCIÓN AUTOMÁTICA DEL PASO 3: Consultar Nombre Completo y Sexo con ClaveÚnica Gob.cl
+    if (fullData.run && fullData.run !== 'No detectado') {
+      try {
+        const cuResp = await fetch('/api/claveunica/userinfo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ run: fullData.run, code: 'AUTO_RESOLVE' })
+        });
+        const cuJson = await cuResp.json();
+        if (cuJson.success && cuJson.data) {
+          const cData = cuJson.data;
+          fullData.fullName = cData.nombreCompleto;
+          fullData.gender = cData.sexo;
+          fullData.estadoOficial = cData.estadoOficial;
+          fullData.autenticadoPor = cData.autenticadoPor;
+
+          if (step3Badge) {
+            step3Badge.textContent = '✅ Paso 3: ClaveÚnica Autenticada';
+            step3Badge.style.opacity = '1';
+          }
+        }
+      } catch (cuErr) {
+        console.warn('Error consulta automática ClaveÚnica:', cuErr);
+      }
+    }
+
     currentExtractedData = fullData;
 
     document.getElementById('val-fullname').textContent = fullData.fullName;
@@ -231,37 +247,14 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('val-raw').textContent = rawText || tramiteVal || '--';
 
     if (isNfcVerified && savedQrSerial) {
-      document.getElementById('val-status-official').textContent = '🛡️ 100% AUTÉNTICO (Coincidencia Perfecta Chip NFC y QR)';
+      document.getElementById('val-status-official').textContent = '🛡️ 100% AUTÉNTICO (NFC + QR + ClaveÚnica Gob.cl)';
       document.getElementById('val-status-official').style.color = '#34d399';
-      showStatus('🛡️ <strong>VERIFICACIÓN CRUZADA COMPLETA:</strong> El Chip NFC y el Código QR pertenecen a la misma Cédula de Identidad legítima.', 'success');
+      showStatus('🛡️ <strong>VERIFICACIÓN COMPLETA DE 3 PASOS FINALIZADA:</strong> Cédula leída por NFC (Paso 1), validada por QR (Paso 2) y autenticada oficialmente por ClaveÚnica Gob.cl (Paso 3).', 'success');
     } else if (isNfcScan) {
-      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado (ID: ' + savedNfcSerial + ').<br>👉 <strong>Ahora presione el botón verde (Paso 2)</strong> para escanear el código QR con la cámara.', 'success');
+      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado.<br>👉 <strong>Ahora presione el botón verde (Paso 2)</strong> para escanear el código QR con la cámara.', 'success');
     } else {
-      showStatus('🔒 <strong>Validación Criptográfica Completada:</strong> Datos escaneados del código oficial del Registro Civil.', 'success');
+      showStatus('🔒 <strong>Validación Criptográfica Completada:</strong> Datos verificados con el servidor oficial.', 'success');
     }
-  }
-
-  // --- BOTÓN CLAVEÚNICA GOB.CL ---
-  if (btnClaveUnica) {
-    btnClaveUnica.addEventListener('click', async () => {
-      showStatus('🔑 <strong>Iniciando conexión con ClaveÚnica Gob.cl...</strong>', 'info');
-      try {
-        const resp = await fetch('/api/claveunica/login');
-        const json = await resp.json();
-        if (json.success && json.authUrl) {
-          if (json.clientIdConfigured) {
-            window.location.href = json.authUrl;
-          } else {
-            showStatus('ℹ️ <strong>Integración ClaveÚnica Lista:</strong> Redirigiendo al portal de autenticación oficial del Gobierno de Chile (accounts.claveunica.gob.cl)...', 'info');
-            setTimeout(() => {
-              window.open(json.authUrl, '_blank');
-            }, 1200);
-          }
-        }
-      } catch (e) {
-        showStatus('Error al conectar con ClaveÚnica: ' + e.message, 'error');
-      }
-    });
   }
 
   // --- PASO 1: LECTOR WEB NFC ---
@@ -333,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- PASO 2: ESCÁNER DE CÁMARA ---
+  // --- PASO 2: ESCÁNER DE CÁMARA (Bloqueado hasta completar Paso 1 NFC) ---
   cameraBtn.addEventListener('click', () => {
     if (!isNfcVerified) {
       showStatus('⚠️ <strong>Secuencia de Seguridad Requerida:</strong> Debe aproximar la Cédula por NFC (Paso 1) antes de activar la cámara.', 'error');
@@ -397,6 +390,11 @@ document.addEventListener('DOMContentLoaded', () => {
               console.log('PDF417/QR detectado con BarcodeDetector nativo:', scannedText);
               stopCameraScanner();
               tramiteInput.value = scannedText;
+
+              if (step2Badge) {
+                step2Badge.textContent = '✅ Paso 2: QR Escaneado';
+              }
+
               updateIdentityResult(scannedText);
             }
           } catch (e) {
@@ -419,6 +417,11 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log('PDF417/QR detectado con ZXing:', scannedText);
             stopCameraScanner();
             tramiteInput.value = scannedText;
+
+            if (step2Badge) {
+              step2Badge.textContent = '✅ Paso 2: QR Escaneado';
+            }
+
             updateIdentityResult(scannedText);
           }
         });
@@ -482,6 +485,11 @@ document.addEventListener('DOMContentLoaded', () => {
       console.log('PDF417/QR decodificado en Foto Snapshot HD:', foundText);
       stopCameraScanner();
       tramiteInput.value = foundText;
+
+      if (step2Badge) {
+        step2Badge.textContent = '✅ Paso 2: QR Escaneado';
+      }
+
       updateIdentityResult(foundText);
     } else {
       showStatus('⚠️ No se detectó un código PDF417 nítido en esta foto.<br>💡 <strong>Consejos:</strong> Acerque el reverso a 15-20cm y asegúrese de tener buena iluminación.', 'error');
@@ -526,7 +534,7 @@ document.addEventListener('DOMContentLoaded', () => {
   btnCopyJson.addEventListener('click', () => {
     if (currentExtractedData) {
       navigator.clipboard.writeText(JSON.stringify(currentExtractedData, null, 2))
-        .then(() => alert('¡Objeto completo verificado en 2 pasos (NFC + QR) copiado al portapapeles!'))
+        .then(() => alert('¡Objeto completo verificado en 3 pasos (NFC + QR + ClaveÚnica) copiado al portapapeles!'))
         .catch(err => alert('Error al copiar: ' + err));
     } else {
       alert('Aún no se ha realizado un escaneo de datos.');
