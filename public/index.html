@@ -299,6 +299,39 @@
       font-weight: bold;
     }
 
+    .camera-controls {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      gap: 0.5rem;
+      z-index: 10;
+    }
+
+    .camera-select {
+      flex: 1;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      padding: 0.5rem;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      outline: none;
+    }
+
+    .btn-snap-hd {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      border: none;
+      color: white;
+      padding: 0.5rem 0.85rem;
+      border-radius: 10px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+    }
+
     .status-box {
       margin-top: 1rem;
       padding: 0.85rem 1rem;
@@ -490,6 +523,10 @@
         <div class="scanner-guide">
           <div class="scanner-line"></div>
         </div>
+      </div>
+      <div class="camera-controls">
+        <select id="camera-select" class="camera-select" title="Seleccionar Cámara"></select>
+        <button id="btn-snap-hd" class="btn-snap-hd">📸 Capturar Foto HD</button>
       </div>
     </div>
 

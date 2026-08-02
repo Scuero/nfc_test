@@ -4,11 +4,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnCloseCamera = document.getElementById('btn-close-camera');
   const cameraModal = document.getElementById('camera-modal');
   const cameraFeed = document.getElementById('camera-feed');
+  const cameraSelect = document.getElementById('camera-select');
+  const btnSnapHd = document.getElementById('btn-snap-hd');
   const statusBox = document.getElementById('status-box');
   const resultCard = document.getElementById('result-card');
   const tramiteInput = document.getElementById('tramite-input');
   const btnCopyJson = document.getElementById('btn-copy-json');
 
+  let activeStream = null;
   let codeReader = null;
   let cameraInterval = null;
   let currentExtractedData = null;
@@ -190,7 +193,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let fullData = parseFullDniData((rawText || '') + ' ' + tramiteVal);
 
-    // Si no se decodificó localmente el nombre o el RUN, consultar la API Express backend
     if (!fullData || fullData.fullName === 'No especificado en lectura' || fullData.run === 'No detectado en PDF417/MRZ') {
       try {
         const resp = await fetch('/api/parse-cedula', {
@@ -221,7 +223,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     currentExtractedData = fullData;
 
-    // Renderizar datos en el Tarjetero UI
     document.getElementById('val-fullname').textContent = fullData.fullName;
     document.getElementById('val-run').textContent = fullData.run;
     document.getElementById('val-serial').textContent = fullData.documentNumber;
@@ -238,54 +239,156 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // --- ESCÁNER DE CÁMARA UNIVERSAL (ZXing + BarcodeDetector) ---
-  async function startCameraScanner() {
+  // Listar cámaras traseras disponibles
+  async function populateCameraDevices() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+      cameraSelect.innerHTML = '';
+
+      videoDevices.forEach((dev, idx) => {
+        const opt = document.createElement('option');
+        opt.value = dev.deviceId;
+        opt.textContent = dev.label || `Cámara ${idx + 1} (${dev.deviceId.slice(0, 6)}...)`;
+        if (dev.label.toLowerCase().includes('back') || dev.label.toLowerCase().includes('trasera') || dev.label.toLowerCase().includes('environment')) {
+          opt.selected = true;
+        }
+        cameraSelect.appendChild(opt);
+      });
+    } catch (e) {
+      console.warn('Enumerar cámaras:', e);
+    }
+  }
+
+  // --- ESCÁNER DE CÁMARA MEJORADO (HD + BarcodeDetector + ZXing Fallback) ---
+  async function startCameraScanner(deviceId = null) {
+    stopCameraScanner();
     cameraModal.classList.add('active');
-    showStatus('Enfoque la cámara al código de barras PDF417 o líneas MRZ al reverso de la Cédula...', 'info');
+    showStatus('Iniciando cámara HD... Mantenga el reverso de la Cédula a 15-20cm con buena luz.', 'info');
 
     try {
-      if (window.ZXing) {
-        codeReader = new ZXing.BrowserMultiFormatReader();
-        const hints = new Map();
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-          ZXing.BarcodeFormat.PDF_417,
-          ZXing.BarcodeFormat.QR_CODE,
-          ZXing.BarcodeFormat.CODE_128
-        ]);
+      const videoConstraints = {
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      };
 
-        await codeReader.decodeFromVideoDevice(null, cameraFeed, (result, err) => {
-          if (result) {
-            const scannedText = result.getText();
-            console.log('PDF417/MRZ escaneado con ZXing:', scannedText);
-            stopCameraScanner();
-            tramiteInput.value = scannedText;
-            updateIdentityResult(scannedText);
-          }
-        });
-      } else if ('BarcodeDetector' in window) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        cameraFeed.srcObject = stream;
+      if (deviceId) {
+        videoConstraints.deviceId = { exact: deviceId };
+      } else {
+        videoConstraints.facingMode = { ideal: 'environment' };
+      }
+
+      activeStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
+      cameraFeed.srcObject = activeStream;
+      await cameraFeed.play();
+
+      await populateCameraDevices();
+
+      // INTENTO 1: BarcodeDetector Nativo de Chromium (MLKit - Ultrarrápido para PDF417 en Android)
+      if ('BarcodeDetector' in window) {
+        showStatus('🔍 Buscando código PDF417 en tiempo real (Escáner Nativo activo)...', 'info');
         const barcodeDetector = new BarcodeDetector({ formats: ['pdf417', 'qr_code', 'code_128'] });
+
         cameraInterval = setInterval(async () => {
           try {
             const barcodes = await barcodeDetector.detect(cameraFeed);
-            if (barcodes.length > 0) {
-              clearInterval(cameraInterval);
+            if (barcodes && barcodes.length > 0) {
               const scannedText = barcodes[0].rawValue;
+              console.log('PDF417 detectado con BarcodeDetector nativo:', scannedText);
               stopCameraScanner();
               tramiteInput.value = scannedText;
               updateIdentityResult(scannedText);
             }
           } catch (e) {
-            console.error(e);
+            console.error('Error BarcodeDetector:', e);
           }
-        }, 400);
+        }, 250);
+
+      } else if (window.ZXing) {
+        // INTENTO 2: ZXing Browser MultiFormat Reader con Hints de PDF417
+        showStatus('🔍 Buscando código PDF417 en tiempo real (Escáner ZXing activo)...', 'info');
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+          ZXing.BarcodeFormat.PDF_417,
+          ZXing.BarcodeFormat.QR_CODE
+        ]);
+
+        codeReader = new ZXing.BrowserMultiFormatReader(hints);
+        codeReader.decodeFromVideoElement(cameraFeed, (result, err) => {
+          if (result) {
+            const scannedText = result.getText();
+            console.log('PDF417 detectado con ZXing:', scannedText);
+            stopCameraScanner();
+            tramiteInput.value = scannedText;
+            updateIdentityResult(scannedText);
+          }
+        });
       } else {
-        showStatus('Su navegador no soporta escáner de cámara nativo ni ZXing. Ingrese los datos manualmente.', 'error');
+        showStatus('Su navegador no admite escáner automático. Presione <strong>"📸 Capturar Foto HD"</strong> para analizar.', 'error');
       }
+
     } catch (err) {
       console.error('Error al iniciar cámara:', err);
-      showStatus('Error de acceso a la cámara: ' + (err.message || err), 'error');
+      showStatus('Error al acceder a la cámara: ' + (err.message || err), 'error');
+    }
+  }
+
+  // --- FOTO SNAPSHOT HD PARA CAPTURA MANUAL ---
+  async function captureAndScanHdSnapshot() {
+    if (!cameraFeed || !cameraFeed.videoWidth) {
+      alert('La cámara aún no ha cargado la imagen.');
+      return;
+    }
+
+    showStatus('⚡ Analizando captura de alta resolución...', 'info');
+
+    const canvas = document.createElement('canvas');
+    canvas.width = cameraFeed.videoWidth;
+    canvas.height = cameraFeed.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(cameraFeed, 0, 0, canvas.width, canvas.height);
+
+    let foundText = null;
+
+    // 1. Probar con BarcodeDetector sobre la imagen HD
+    if ('BarcodeDetector' in window) {
+      try {
+        const detector = new BarcodeDetector({ formats: ['pdf417', 'qr_code', 'code_128'] });
+        const results = await detector.detect(canvas);
+        if (results && results.length > 0) {
+          foundText = results[0].rawValue;
+        }
+      } catch (e) {
+        console.warn('Snapshot BarcodeDetector error:', e);
+      }
+    }
+
+    // 2. Probar con ZXing sobre el canvas HD
+    if (!foundText && window.ZXing) {
+      try {
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.PDF_417]);
+        const zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+        const imgUrl = canvas.toDataURL('image/png');
+        const imgObj = new Image();
+        imgObj.src = imgUrl;
+        await imgObj.decode();
+        const res = await zxingReader.decodeFromImageElement(imgObj);
+        if (res) {
+          foundText = res.getText();
+        }
+      } catch (e) {
+        console.warn('Snapshot ZXing error:', e);
+      }
+    }
+
+    if (foundText) {
+      console.log('PDF417 decodificado en Foto Snapshot HD:', foundText);
+      stopCameraScanner();
+      tramiteInput.value = foundText;
+      updateIdentityResult(foundText);
+    } else {
+      showStatus('⚠️ No se detectó un código PDF417 nítido en esta foto.<br>💡 <strong>Consejos:</strong> Acerque el reverso a 15-20cm, asegúrese de tener buena iluminación y evite los reflejos de luz sobre el plástico de la Cédula.', 'error');
     }
   }
 
@@ -302,10 +405,11 @@ document.addEventListener('DOMContentLoaded', () => {
       cameraInterval = null;
     }
 
-    if (cameraFeed.srcObject) {
-      cameraFeed.srcObject.getTracks().forEach(t => t.stop());
-      cameraFeed.srcObject = null;
+    if (activeStream) {
+      activeStream.getTracks().forEach(t => t.stop());
+      activeStream = null;
     }
+    cameraFeed.srcObject = null;
   }
 
   cameraBtn.addEventListener('click', () => {
@@ -317,9 +421,18 @@ document.addEventListener('DOMContentLoaded', () => {
     showStatus('Escáner de cámara cerrado.', 'info');
   });
 
+  btnSnapHd.addEventListener('click', () => {
+    captureAndScanHdSnapshot();
+  });
+
+  cameraSelect.addEventListener('change', () => {
+    const selectedDeviceId = cameraSelect.value;
+    startCameraScanner(selectedDeviceId);
+  });
+
   // --- WEB NFC API ---
   if (!('NDEFReader' in window)) {
-    showStatus('Web NFC no está disponible en este navegador. Puede utilizar la Cámara PDF417 para extraer todos los datos.', 'info');
+    showStatus('Web NFC no está disponible en este navegador. Utilice el botón verde de la Cámara PDF417.', 'info');
     scanBtn.disabled = true;
   } else {
     scanBtn.addEventListener('click', async () => {
