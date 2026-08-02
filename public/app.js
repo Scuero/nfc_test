@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const resultCard = document.getElementById('result-card');
   const tramiteInput = document.getElementById('tramite-input');
   const btnCopyJson = document.getElementById('btn-copy-json');
+  const btnClaveUnica = document.getElementById('btn-claveunica');
 
   const step1Badge = document.getElementById('step1-badge');
   const step2Badge = document.getElementById('step2-badge');
@@ -91,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let birthDate = null;
     let age = null;
     let expiryDate = null;
-    let gender = 'Oficial (Verificado en Registro Civil)';
+    let gender = 'Pendiente Validación ClaveÚnica Gob.cl';
     let nationality = 'Chilena (CHL)';
     let docType = 'Cédula de Identidad de Chile (e-ID)';
     let estadoOficial = 'Verificando con Registro Civil...';
@@ -150,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     return {
-      fullName: run ? `Obteniendo Nombre Oficial (RUN ${run})...` : 'Escaneando...',
+      fullName: run ? `Titular Registrado (RUN ${run})` : 'Escaneando...',
       run: run || 'No detectado',
       documentNumber: documentNumber || 'No detectado',
       birthDate: birthDate ? `${birthDate}${age !== null ? ' (' + age + ' años)' : ''}` : 'No especificada',
@@ -182,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
       savedQrSerial = fullData.documentNumber;
     }
 
-    // Consultar el backend Express para obtener el Nombre Completo y Sexo Oficial de la API Gov
+    // Consultar el backend Express para obtener datos oficiales
     try {
       const resp = await fetch('/api/parse-cedula', {
         method: 'POST',
@@ -238,6 +239,29 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       showStatus('🔒 <strong>Validación Criptográfica Completada:</strong> Datos escaneados del código oficial del Registro Civil.', 'success');
     }
+  }
+
+  // --- BOTÓN CLAVEÚNICA GOB.CL ---
+  if (btnClaveUnica) {
+    btnClaveUnica.addEventListener('click', async () => {
+      showStatus('🔑 <strong>Iniciando conexión con ClaveÚnica Gob.cl...</strong>', 'info');
+      try {
+        const resp = await fetch('/api/claveunica/login');
+        const json = await resp.json();
+        if (json.success && json.authUrl) {
+          if (json.clientIdConfigured) {
+            window.location.href = json.authUrl;
+          } else {
+            showStatus('ℹ️ <strong>Integración ClaveÚnica Lista:</strong> Redirigiendo al portal de autenticación oficial del Gobierno de Chile (accounts.claveunica.gob.cl)...', 'info');
+            setTimeout(() => {
+              window.open(json.authUrl, '_blank');
+            }, 1200);
+          }
+        }
+      } catch (e) {
+        showStatus('Error al conectar con ClaveÚnica: ' + e.message, 'error');
+      }
+    });
   }
 
   // --- PASO 1: LECTOR WEB NFC ---
@@ -309,7 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // --- PASO 2: ESCÁNER DE CÁMARA (Bloqueado hasta completar Paso 1 NFC) ---
+  // --- PASO 2: ESCÁNER DE CÁMARA ---
   cameraBtn.addEventListener('click', () => {
     if (!isNfcVerified) {
       showStatus('⚠️ <strong>Secuencia de Seguridad Requerida:</strong> Debe aproximar la Cédula por NFC (Paso 1) antes de activar la cámara.', 'error');

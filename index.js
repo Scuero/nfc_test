@@ -72,7 +72,7 @@ async function getVerifiedNameByRun(cleanRun) {
   return null;
 }
 
-// Conector Oficial de Verificación de Identidad con API del Gobierno / Registro Civil
+// Conector Oficial de Verificación de Identidad con API del Gobierno / Registro Civil / ClaveÚnica
 async function fetchOfficialIdentityRecord(run, serial, mrzVal) {
   let nombreCompleto = null;
   let sexo = null;
@@ -80,7 +80,14 @@ async function fetchOfficialIdentityRecord(run, serial, mrzVal) {
 
   const cleanRun = run ? run.replace(/[^0-9kK]/g, '').toUpperCase() : '';
 
-  // 1. Consulta a API Institucional de Identidad del Registro Civil (si hay token/url configurada)
+  // 1. Extraer Sexo desde byte de control MRZ de la Cédula (si está presente)
+  if (mrzVal && mrzVal.length >= 24) {
+    const genderByte = mrzVal.charAt(16);
+    if (genderByte === 'M') sexo = 'Masculino (M)';
+    else if (genderByte === 'F') sexo = 'Femenino (F)';
+  }
+
+  // 2. Consulta a API Institucional de Identidad / ClaveÚnica (si hay token configurado)
   const apiUrl = process.env.REGISTRO_CIVIL_API_URL || 'https://servicios.registrocivil.gob.cl/api/v1/verificacion';
   const apiToken = process.env.REGISTRO_CIVIL_API_TOKEN;
 
@@ -109,15 +116,8 @@ async function fetchOfficialIdentityRecord(run, serial, mrzVal) {
     }
   }
 
-  // 2. Extraer Sexo desde byte de control MRZ si está presente en el código oficial
-  if (!sexo && mrzVal && mrzVal.length >= 24) {
-    const genderByte = mrzVal.charAt(16);
-    if (genderByte === 'M') sexo = 'Masculino (M)';
-    else if (genderByte === 'F') sexo = 'Femenino (F)';
-  }
-
   if (!sexo) {
-    sexo = 'Masculino (M)';
+    sexo = 'Pendiente Validación ClaveÚnica Gob.cl';
   }
 
   return {
@@ -126,6 +126,66 @@ async function fetchOfficialIdentityRecord(run, serial, mrzVal) {
     estadoOficial: estadoOficial
   };
 }
+
+// --- INTEGACIÓN OFICIAL CLAVEÚNICA GOBIERNO DE CHILE (OAuth2.0) ---
+app.get('/api/claveunica/login', (req, res) => {
+  const clientId = process.env.CLAVEUNICA_CLIENT_ID || 'DEMO_CLIENT_ID';
+  const redirectUri = encodeURIComponent(process.env.CLAVEUNICA_REDIRECT_URI || 'http://localhost:3000/api/claveunica/callback');
+  const state = Math.random().toString(36).substring(7);
+
+  const claveUnicaUrl = `https://accounts.claveunica.gob.cl/openid/authorize?client_id=${clientId}&response_type=code&scope=openid%20run%20name%20email&redirect_uri=${redirectUri}&state=${state}`;
+
+  res.json({
+    success: true,
+    authUrl: claveUnicaUrl,
+    clientIdConfigured: Boolean(process.env.CLAVEUNICA_CLIENT_ID)
+  });
+});
+
+// Endpoint para procesar el código de autorización de ClaveÚnica o payload de autenticación
+app.post('/api/claveunica/userinfo', async (req, res) => {
+  try {
+    const { code, accessToken } = req.body;
+
+    // Si viene un accessToken o code, consultamos el endpoint UserInfo oficial de ClaveÚnica
+    if (code || accessToken) {
+      try {
+        const userinfoResp = await fetch('https://accounts.claveunica.gob.cl/openid/userinfo', {
+          headers: {
+            'Authorization': `Bearer ${accessToken || code}`,
+            'Accept': 'application/json'
+          },
+          signal: AbortSignal.timeout(3500)
+        });
+
+        if (userinfoResp.ok) {
+          const uJson = await userinfoResp.json();
+          const nombres = uJson.name ? (Array.isArray(uJson.name.nombres) ? uJson.name.nombres.join(' ') : uJson.name.nombres) : '';
+          const apellidos = uJson.name ? (Array.isArray(uJson.name.apellidos) ? uJson.name.apellidos.join(' ') : uJson.name.apellidos) : '';
+          const nombreCompleto = `${nombres} ${apellidos}`.trim();
+          const runNum = uJson.RolUnico ? `${uJson.RolUnico.numero}-${uJson.RolUnico.DV}` : null;
+          const sexo = uJson.gender || uJson.sexo || 'Oficial ClaveÚnica';
+
+          return res.json({
+            success: true,
+            data: {
+              nombreCompleto: nombreCompleto || 'Autenticado ClaveÚnica',
+              run: runNum ? formatRun(runNum) : null,
+              sexo: sexo === 'Masculino' ? 'Masculino (M)' : (sexo === 'Femenino' ? 'Femenino (F)' : sexo),
+              autenticadoPor: 'ClaveÚnica (Gobierno de Chile)'
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('Error UserInfo ClaveÚnica:', err.message);
+      }
+    }
+
+    res.status(400).json({ error: 'Código o Token de ClaveÚnica inválido o no proporcionado' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Endpoint para decodificar y verificar Cédula Chilena directamente con el Registro Civil
 app.post('/api/parse-cedula', async (req, res) => {
