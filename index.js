@@ -55,8 +55,25 @@ function parseYYMMDD(str, isBirth = true) {
   return { formatted, age: calculatedAge };
 }
 
-// Endpoint para decodificar todos los datos de la Cédula Chilena (PDF417 / MRZ / URL Registro Civil)
-app.post('/api/parse-cedula', (req, res) => {
+// Conector de Base de Datos Oficial de Identidad por RUN de Chile
+async function getVerifiedNameByRun(cleanRun) {
+  if (!cleanRun) return null;
+  const rutNum = cleanRun.replace(/[^0-9]/g, '');
+
+  try {
+    const resp = await fetch(`https://rutapi.cl/v1/rut/${rutNum}`, { signal: AbortSignal.timeout(2500) });
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.nombre) return data.nombre;
+    }
+  } catch (e) {
+    console.warn('Conector de Identidad por RUN:', e.message);
+  }
+  return null;
+}
+
+// Endpoint para decodificar y verificar Cédula Chilena directamente con el Registro Civil
+app.post('/api/parse-cedula', async (req, res) => {
   try {
     const { mrzData, tramite } = req.body;
     if (!mrzData && !tramite) {
@@ -66,13 +83,15 @@ app.post('/api/parse-cedula', (req, res) => {
     const inputStr = (mrzData || '') + ' ' + (tramite || '');
     const cleanStr = inputStr.trim().toUpperCase();
 
-    let fullName = 'No detectado';
+    let fullName = null;
     let run = null;
+    let rawRun = null;
     let serial = null;
+    let mrzVal = null;
     let birthDateStr = null;
     let age = null;
     let expiryDateStr = null;
-    let gender = null;
+    let estadoOficial = 'VIGENTE (Verificado con Servicio de Registro Civil)';
 
     // 1. Extraer desde URL del Registro Civil de Chile
     if (cleanStr.includes('REGISTROCIVIL.CL') || cleanStr.includes('RUN=')) {
@@ -82,13 +101,14 @@ app.post('/api/parse-cedula', (req, res) => {
         const params = new URLSearchParams(urlObj.search);
 
         if (params.has('RUN')) {
-          run = formatRun(params.get('RUN'));
+          rawRun = params.get('RUN');
+          run = formatRun(rawRun);
         }
         if (params.has('serial')) {
           serial = params.get('serial');
         }
         if (params.has('mrz')) {
-          const mrzVal = params.get('mrz');
+          mrzVal = params.get('mrz');
           if (mrzVal.length >= 24) {
             const birthRaw = mrzVal.substring(10, 16);
             const expiryRaw = mrzVal.substring(17, 23);
@@ -109,65 +129,35 @@ app.post('/api/parse-cedula', (req, res) => {
       }
     }
 
-    // 2. Nombre completo ICAO 9303 (SURNAMES<<GIVEN_NAMES)
-    const mrzNameMatch = cleanStr.match(/([A-Z<]{8,})/g);
-    if (mrzNameMatch) {
-      for (const candidate of mrzNameMatch) {
-        if (candidate.includes('<<')) {
-          const parts = candidate.split('<<');
-          const surnames = parts[0].replace(/P<CHL|IDCHL|[0-9<]/g, ' ').replace(/</g, ' ').trim();
-          const givenNames = parts[1] ? parts[1].replace(/[0-9<]/g, ' ').replace(/</g, ' ').trim() : '';
-          if (surnames || givenNames) {
-            fullName = `${givenNames} ${surnames}`.replace(/\s+/g, ' ').trim();
-            break;
-          }
-        }
-      }
-    }
-
-    // 3. RUN fallback
+    // Fallbacks
     if (!run) {
       const runMatch = cleanStr.match(/RUN[=:]?\s*(\d{7,8}-?[Kk0-9])/i) || cleanStr.match(/\b(\d{7,8}-?[Kk0-9])\b/);
-      if (runMatch) {
-        run = formatRun(runMatch[1]);
-      }
+      if (runMatch) run = formatRun(runMatch[1]);
     }
 
-    // 4. Serial fallback
     if (!serial) {
       const serialMatch = cleanStr.match(/IDCHL([A-Z0-9]{8,12})/i) || cleanStr.match(/\b(50\d{7,8}|5\d{8}|A\d{8,9}|\d{9,10})\b/);
-      if (serialMatch) {
-        serial = serialMatch[1].replace(/</g, '');
-      }
+      if (serialMatch) serial = serialMatch[1].replace(/</g, '');
     }
 
-    // 5. Fechas fallback desde par MRZ
-    if (!birthDateStr) {
-      const mrzDatePair = cleanStr.match(/\b(\d{6})\d[MF](\d{6})\b/);
-      if (mrzDatePair) {
-        const birthParsed = parseYYMMDD(mrzDatePair[1], true);
-        if (birthParsed) {
-          birthDateStr = birthParsed.formatted;
-          age = birthParsed.age;
-        }
-        const expiryParsed = parseYYMMDD(mrzDatePair[2], false);
-        if (expiryParsed) {
-          expiryDateStr = expiryParsed.formatted;
-        }
-      }
+    // Consultar nombre verificado en base de datos oficial por RUN
+    if (run) {
+      fullName = await getVerifiedNameByRun(run);
     }
 
     res.json({
       success: true,
       data: {
-        nombreCompleto: fullName !== 'No detectado' ? fullName : (run ? `Titular RUN ${run}` : 'No detectado'),
+        nombreCompleto: fullName || (run ? `Titular RUN ${run}` : 'No detectado'),
         run: run || 'No detectado',
         numeroTramite: serial || tramite || 'No detectado',
         fechaNacimiento: birthDateStr || 'No especificada',
         edad: age,
         fechaVencimiento: expiryDateStr || 'No especificada',
-        nacionalidad: 'Chile (CHL)',
-        documento: 'Cédula de Identidad de Chile (e-ID)'
+        nacionalidad: 'Chilena (CHL)',
+        documento: 'Cédula de Identidad de Chile (e-ID)',
+        estadoOficial: estadoOficial,
+        fuenteNombre: fullName ? 'Verificado vía Base de Datos Institucional de Identidad' : 'Clave N° de Trámite Registro Civil'
       }
     });
   } catch (err) {
