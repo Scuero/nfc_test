@@ -72,20 +72,14 @@ async function getVerifiedNameByRun(cleanRun) {
   return null;
 }
 
-// Módulo de Resolución de Identidad Oficial por RUN / Registro Institucional
-const OFFICIAL_IDENTITY_REGISTRY = {
-  '18251533-7': { nombreCompleto: null, sexo: 'Masculino (M)' },
-  '18.251.533-7': { nombreCompleto: null, sexo: 'Masculino (M)' }
-};
-
-// Pipeline de Verificación Multimétodo de Identidad Chilena
+// Pipeline de Verificación de Identidad Chilena (Derivada exclusivamente de la Cédula de Identidad)
 async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDataInput, birthDateStr, age, expiryDateStr) {
   const cleanRun = run ? run.replace(/[^0-9kK]/g, '').toUpperCase() : '';
   const formattedRun = run ? formatRun(run) : null;
 
   // Método 1: Chip NFC eMRTD (ICAO 9303 / APDU)
   const nfcMethod = {
-    metodo: "1. Chip NFC eMRTD (ICAO 9303)",
+    metodo: "1. Chip NFC eMRTD de Cédula (ICAO 9303)",
     estado: nfcDataInput ? "VERIFICADO" : "DISPONIBLE",
     chipUid: nfcDataInput?.chipUid || "ISO-DEP-EMRTD-CHIP"
   };
@@ -135,22 +129,9 @@ async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDa
   }
 
   const claveUnicaMethod = {
-    metodo: "3. Autenticación ClaveÚnica Gob.cl",
+    metodo: "3. Autenticación ClaveÚnica Gob.cl por Cédula",
     estado: claveUnicaNombre ? "AUTENTICADO" : "ACTIVO_PENDIENTE_TOKEN",
     endpoint: "https://accounts.claveunica.gob.cl/openid/userinfo"
-  };
-
-  // Método 4: Registro Institucional / Base de Datos
-  let dbNombre = null;
-  let dbSexo = null;
-  if (formattedRun && OFFICIAL_IDENTITY_REGISTRY[formattedRun]) {
-    dbNombre = OFFICIAL_IDENTITY_REGISTRY[formattedRun].nombreCompleto;
-    dbSexo = OFFICIAL_IDENTITY_REGISTRY[formattedRun].sexo;
-  }
-
-  const dbMethod = {
-    metodo: "4. Base de Datos de Usuarios e Identidades Institucionales",
-    estado: dbNombre ? "COINCIDENCIA_ENCONTRADA" : "CONSULTADO"
   };
 
   // Extraer Sexo desde byte MRZ si aplica
@@ -161,8 +142,8 @@ async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDa
     else if (gByte === 'F') mrzSexo = 'Femenino (F)';
   }
 
-  const resolvedFullName = claveUnicaNombre || dbNombre || (formattedRun ? `Titular Cédula RUN ${formattedRun}` : 'No detectado');
-  const resolvedGender = claveUnicaSexo || dbSexo || mrzSexo || 'Oficial Registrado';
+  const resolvedFullName = claveUnicaNombre || (formattedRun ? `Titular Cédula RUN ${formattedRun}` : 'No detectado');
+  const resolvedGender = claveUnicaSexo || mrzSexo || 'Oficial Registrado';
 
   return {
     fullName: resolvedFullName,
@@ -178,8 +159,7 @@ async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDa
     metodosVerificacion: {
       metodo1_nfcChip: nfcMethod,
       metodo2_registroCivilSidiv: sidivMethod,
-      metodo3_claveUnicaGob: claveUnicaMethod,
-      metodo4_baseDatosInstitucional: dbMethod
+      metodo3_claveUnicaGob: claveUnicaMethod
     }
   };
 }
