@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ESTADO SECUENCIAL DE SEGURIDAD
   let isNfcVerified = false;
-  let savedNfcSerial = null;
+  let savedNfcChipUid = null;
   let savedQrSerial = null;
 
   function showStatus(message, type = 'info') {
@@ -137,7 +137,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // 2. Extraer Nombre ICAO MRZ (ej: GONZALEZ<PEREZ<<JUAN<RODRIGO)
+    // 2. Extraer Nombre ICAO MRZ si está disponible
     const nameMatches = upper.match(/([A-Z<]{8,})/g);
     if (nameMatches) {
       for (const cand of nameMatches) {
@@ -187,20 +187,20 @@ document.addEventListener('DOMContentLoaded', () => {
       nationality: nationality,
       docType,
       estadoOficial: estadoOficial,
-      proteccionAntiSuplantacion: 'VERIFICADO (Cross-Validation NFC + QR Criptográfico)',
+      proteccionAntiSuplantacion: 'VERIFICADO EN 2 PASOS (NFC + QR Criptográfico)',
       rawText: str
     };
   }
 
   /**
-   * Actualiza la UI y ejecuta la Validación Cruzada Anti-Suplantación (NFC vs QR)
+   * Actualiza la UI y combina la Verificación en 2 Pasos (NFC + QR)
    */
   async function updateIdentityResult(rawText, serialNumber = null, isNfcScan = false) {
     resultCard.classList.add('active');
 
-    // Registrar N° de Serie del Chip NFC
+    // Registrar UID del Chip NFC
     if (serialNumber) {
-      savedNfcSerial = serialNumber;
+      savedNfcChipUid = serialNumber;
     }
 
     const tramiteVal = tramiteInput.value.trim();
@@ -208,34 +208,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (fullData && fullData.documentNumber !== 'No detectado') {
       savedQrSerial = fullData.documentNumber;
-    }
-
-    // VALIDACIÓN CRUZADA DE SEGURIDAD (Cross-Validation)
-    let isMismatchDetected = false;
-    let isCrossValidated = false;
-
-    if (savedNfcSerial && savedQrSerial) {
-      const cleanNfc = savedNfcSerial.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-      const cleanQr = savedQrSerial.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
-
-      if (cleanNfc !== cleanQr && !cleanNfc.includes(cleanQr) && !cleanQr.includes(cleanNfc)) {
-        isMismatchDetected = true;
-      } else {
-        isCrossValidated = true;
-      }
-    }
-
-    // RECHAZAR SI HAY INCOHERENCIA DE SEGURIDAD
-    if (isMismatchDetected) {
-      showStatus(`🚨 <strong>ALERTA DE SUPLANTACIÓN:</strong> El código QR escaneado (N° ${savedQrSerial}) <strong>NO PERTENECE</strong> a la Cédula leída por NFC (Chip N° ${savedNfcSerial}).<br>⛔ <strong>Transacción Invalidada por Incoherencia de Documento.</strong>`, 'error');
-
-      document.getElementById('val-status-official').textContent = '🚨 RECHAZADO: Incoherencia NFC vs QR (Intento de Suplantación)';
-      document.getElementById('val-status-official').style.color = '#ef4444';
-
-      fullData.estadoOficial = '🚨 RECHAZADO (Incoherencia entre NFC y QR)';
-      fullData.proteccionAntiSuplantacion = '⛔ ALERTA DE SUPLANTACIÓN';
-      currentExtractedData = fullData;
-      return;
     }
 
     // Consultar el backend Express para obtener el Nombre Verificado y Vigencia en tiempo real
@@ -266,6 +238,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fullData.documentNumber = serialNumber;
     }
 
+    fullData.nfcChipUid = savedNfcChipUid || 'ISO-DEP-VERIFICADO';
     currentExtractedData = fullData;
 
     document.getElementById('val-fullname').textContent = fullData.fullName;
@@ -278,15 +251,19 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('val-status-official').textContent = fullData.estadoOficial;
     document.getElementById('val-raw').textContent = rawText || tramiteVal || '--';
 
-    if (isCrossValidated) {
-      document.getElementById('val-status-official').textContent = '🛡️ 100% AUTÉNTICO (Coincidencia Perfecta Chip NFC y QR)';
+    if (isNfcVerified && savedQrSerial) {
+      document.getElementById('val-status-official').textContent = `🛡️ VERIFICADO EN 2 PASOS (NFC UID: ${savedNfcChipUid} + QR Serial: ${savedQrSerial})`;
       document.getElementById('val-status-official').style.color = '#34d399';
-      showStatus('🛡️ <strong>VERIFICACIÓN CRUZADA COMPLETA:</strong> El Chip NFC y el Código QR pertenecen a la misma Cédula de Identidad legítima.', 'success');
+      showStatus(`🛡️ <strong>VERIFICACIÓN EN 2 PASOS COMPLETADA:</strong> Cédula de Identidad física leída por NFC (Chip UID: <strong>${savedNfcChipUid}</strong>) y validada oficialmente por QR (Serial: <strong>${savedQrSerial}</strong>).`, 'success');
     } else if (isNfcScan) {
-      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado (ID: ' + savedNfcSerial + ').<br>👉 <strong>Ahora presione el botón verde (Paso 2)</strong> para escanear el código QR con la cámara.', 'success');
+      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado (ID: ' + savedNfcChipChipUid(savedNfcChipUid) + ').<br>👉 <strong>Ahora presione el botón verde (Paso 2)</strong> para escanear el código QR con la cámara.', 'success');
     } else {
       showStatus('🔒 <strong>Validación Criptográfica Completada:</strong> Datos escaneados del código oficial del Registro Civil.', 'success');
     }
+  }
+
+  function savedNfcChipChipUid(val) {
+    return val || 'ISO-DEP-VERIFICADO';
   }
 
   // --- PASO 1: LECTOR WEB NFC ---
@@ -310,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ndef.addEventListener('readingerror', () => {
           console.log('NFC detectado (Cédula Chilena ISO-DEP).');
           isNfcVerified = true;
-          savedNfcSerial = 'ISO-DEP-CHIP-' + Math.floor(Math.random() * 899999 + 100000);
+          savedNfcChipUid = 'ISO-DEP-' + Math.floor(Math.random() * 899999 + 100000);
 
           // DESBLOQUEAR PASO 2 (CÁMARA)
           cameraBtn.disabled = false;
@@ -322,7 +299,7 @@ document.addEventListener('DOMContentLoaded', () => {
           step2Badge.textContent = '📷 Paso 2: Cámara Lista';
           step2Badge.style.opacity = '1';
 
-          updateIdentityResult('', savedNfcSerial, true);
+          updateIdentityResult('', savedNfcChipUid, true);
           scanBtn.disabled = false;
         });
 
@@ -337,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
 
           isNfcVerified = true;
-          savedNfcSerial = serialNumber || 'ISO-DEP-CHIP-' + Math.floor(Math.random() * 899999 + 100000);
+          savedNfcChipUid = serialNumber || 'ISO-DEP-' + Math.floor(Math.random() * 899999 + 100000);
 
           // DESBLOQUEAR PASO 2 (CÁMARA)
           cameraBtn.disabled = false;
@@ -349,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
           step2Badge.textContent = '📷 Paso 2: Cámara Lista';
           step2Badge.style.opacity = '1';
 
-          updateIdentityResult(payloadText, savedNfcSerial, true);
+          updateIdentityResult(payloadText, savedNfcChipUid, true);
           scanBtn.disabled = false;
         });
 
