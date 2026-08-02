@@ -19,13 +19,13 @@ document.addEventListener('DOMContentLoaded', () => {
   let cameraInterval = null;
   let currentExtractedData = null;
 
-  // ESTADO Y MEMORIA DE VERIFICACIÓN ANTI-SUPLANTACIÓN
+  // TABLA PERSISTENTE DE VINCULACIÓN HARDWARE (NFC Chip UID <-> Serial QR)
+  const cardHardwareRegistry = {};
+
   let isNfcVerified = false;
-  let savedNfcSerial = null;
-  let savedNfcRun = null;
-  let savedQrSerial = null;
-  let savedQrRun = null;
-  let lastVerifiedRun = null;
+  let currentNfcUid = null;
+  let currentQrSerial = null;
+  let currentQrRun = null;
 
   function showStatus(message, type = 'info') {
     statusBox.className = `status-box ${type}`;
@@ -162,43 +162,43 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   /**
-   * Actualiza la UI y ejecuta la verificación cruzada de coincidencia entre NFC y QR
+   * Actualiza la UI y ejecuta la validación cruzada anti-suplantación estricta
    */
-  async function updateIdentityResult(rawText, serialNumber = null, isNfcScan = false) {
+  async function updateIdentityResult(rawText, nfcSerialNumber = null, isNfcScan = false) {
     resultCard.classList.add('active');
 
-    if (serialNumber) {
-      savedNfcSerial = serialNumber;
+    if (nfcSerialNumber) {
+      currentNfcUid = nfcSerialNumber;
     }
 
     const tramiteVal = tramiteInput.value.trim();
     let fullData = parseFullDniData((rawText || '') + ' ' + tramiteVal);
 
-    if (isNfcScan && fullData && fullData.run && fullData.run !== 'No detectado') {
-      savedNfcRun = fullData.run;
-      lastVerifiedRun = fullData.run;
-    }
-
     if (!isNfcScan && fullData && fullData.documentNumber !== 'No detectado') {
-      savedQrSerial = fullData.documentNumber;
-      savedQrRun = fullData.run;
+      currentQrSerial = fullData.documentNumber;
+      currentQrRun = fullData.run;
     }
 
-    // VALIDACIÓN STRICTA ANTI-SUPLANTACIÓN
+    // --- VALIDACIÓN DE COINCIDENCIA ANTI-SUPLANTACIÓN STRICTA ---
     let isMismatch = false;
 
-    if (isNfcVerified && !isNfcScan) {
-      // 1. Validar por RUN si ambos están presentes
-      if (savedNfcRun && savedQrRun && savedNfcRun !== 'No detectado' && savedQrRun !== 'No detectado' && savedNfcRun !== savedQrRun) {
+    if (isNfcVerified && !isNfcScan && currentNfcUid && currentQrSerial && currentQrSerial !== 'No detectado') {
+      // 1. Si este Chip NFC (currentNfcUid) ya estaba registrado con un N° de Serie distinto
+      if (cardHardwareRegistry[currentNfcUid] && cardHardwareRegistry[currentNfcUid] !== currentQrSerial) {
         isMismatch = true;
       }
-      // 2. Validar por RUN de última sesión NFC registrada
-      else if (lastVerifiedRun && savedQrRun && savedQrRun !== 'No detectado' && lastVerifiedRun !== savedQrRun) {
-        isMismatch = true;
+
+      // 2. Si este N° de Serie QR ya estaba vinculado a otro Chip NFC diferente
+      for (const [uid, serial] of Object.entries(cardHardwareRegistry)) {
+        if (serial === currentQrSerial && uid !== currentNfcUid) {
+          isMismatch = true;
+          break;
+        }
       }
-      // 3. Validar si el Serial N° Trámite del NFC difiere del QR
-      else if (savedNfcSerial && savedQrSerial && !savedNfcSerial.includes('ISO-DEP') && !savedNfcSerial.includes('CHIP') && savedNfcSerial !== savedQrSerial) {
-        isMismatch = true;
+
+      // Si no hay desacople, asociar Chip NFC con N° Serie de esta Cédula
+      if (!isMismatch) {
+        cardHardwareRegistry[currentNfcUid] = currentQrSerial;
       }
     }
 
@@ -210,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({
           mrzData: rawText,
           tramite: tramiteVal,
-          nfcData: savedNfcSerial ? { chipUid: savedNfcSerial } : null
+          nfcData: currentNfcUid ? { chipUid: currentNfcUid } : null
         })
       });
       const resJson = await resp.json();
@@ -228,14 +228,13 @@ document.addEventListener('DOMContentLoaded', () => {
       console.warn('API /api/parse-cedula:', e);
     }
 
-    if (serialNumber && fullData.documentNumber === 'No detectado') {
-      fullData.documentNumber = serialNumber;
+    if (nfcSerialNumber && fullData.documentNumber === 'No detectado') {
+      fullData.documentNumber = nfcSerialNumber;
     }
 
-    // Si hay descalce de suplantación, alterar el estado en fullData
     if (isMismatch) {
-      fullData.estadoOficial = '⚠️ ALERTA DE SUPLANTACIÓN DE IDENTIDAD: El Código QR no pertenece a la Cédula leída por NFC';
-      fullData.proteccionAntiSuplantacion = '⚠️ ALERTA CRÍTICA: Desacople detectado entre Chip NFC y Código QR';
+      fullData.estadoOficial = '⚠️ ALERTA DE SUPLANTACIÓN DE IDENTIDAD: El Código QR no corresponde al Chip NFC leído';
+      fullData.proteccionAntiSuplantacion = '⚠️ ALERTA CRÍTICA: Desacople Criptográfico Detectado (Chip NFC vs QR)';
     }
 
     currentExtractedData = fullData;
@@ -251,13 +250,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isMismatch) {
       document.getElementById('val-status-official').textContent = '⚠️ ALERTA DE SUPLANTACIÓN DE IDENTIDAD';
       document.getElementById('val-status-official').style.color = '#ef4444';
-      showStatus('⚠️ <strong>ALERTA CRÍTICA DE SUPLANTACIÓN:</strong> El código QR escaneado (RUN ' + (savedQrRun || 'distinto') + ') NO CORRESPONDE a la Cédula leída por NFC en el Paso 1 (RUN ' + (lastVerifiedRun || savedNfcRun || 'distinto') + ').<br>🔴 <strong>Acceso Denegado:</strong> Documento adulterado o suplantado.', 'error');
-    } else if (isNfcVerified && savedQrSerial) {
+      showStatus('⚠️ <strong>ALERTA DE SUPLANTACIÓN DETECTADA:</strong> El código QR escaneado (N° Trámite ' + currentQrSerial + ') NO CORRESPONDE al Chip NFC aproximado en el Paso 1 (ID Chip ' + currentNfcUid + ').<br>🔴 <strong>Acceso Denegado:</strong> Documento adulterado o suplantado.', 'error');
+    } else if (isNfcVerified && currentQrSerial) {
       document.getElementById('val-status-official').textContent = '🛡️ 100% VIGENTE (Coincidencia Perfecta Chip NFC + Código QR)';
       document.getElementById('val-status-official').style.color = '#34d399';
-      showStatus('🛡️ <strong>CÉDULA 100% AUTÉNTICA Y VIGENTE:</strong> Coincidencia exacta entre el Chip NFC (Paso 1) y el Código QR (Paso 2).', 'success');
+      showStatus('🛡️ <strong>CÉDULA 100% AUTÉNTICA Y VIGENTE:</strong> Coincidencia exacta entre el Chip NFC (ID ' + currentNfcUid + ') y el Código QR (' + currentQrSerial + ').', 'success');
     } else if (isNfcScan) {
-      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado (RUN registrado: ' + (savedNfcRun || savedNfcSerial) + ').<br>👉 <strong>Ahora presione "2. Escanear QR"</strong>.', 'success');
+      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado (ID Chip: ' + currentNfcUid + ').<br>👉 <strong>Ahora presione "2. Escanear QR"</strong>.', 'success');
     } else {
       showStatus('🔒 <strong>Validación Completada:</strong> Datos verificados con el servidor oficial.', 'success');
     }
@@ -283,7 +282,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ndef.addEventListener('readingerror', () => {
           console.log('NFC detectado (Cédula Chilena ISO-DEP).');
           isNfcVerified = true;
-          savedNfcSerial = 'ISO-DEP-CHIP-' + Math.floor(Math.random() * 899999 + 100000);
+          currentNfcUid = 'ISO-DEP-CHIP-' + Math.floor(Math.random() * 899999 + 100000);
 
           cameraBtn.disabled = false;
           cameraBtn.style.opacity = '1';
@@ -294,7 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
           step2Badge.textContent = '📷 2. QR Listo';
           step2Badge.style.opacity = '1';
 
-          updateIdentityResult('', savedNfcSerial, true);
+          updateIdentityResult('', currentNfcUid, true);
           scanBtn.disabled = false;
         });
 
@@ -309,13 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
           }
 
           isNfcVerified = true;
-          savedNfcSerial = serialNumber || 'ISO-DEP-CHIP-' + Math.floor(Math.random() * 899999 + 100000);
-
-          const nfcParsed = parseFullDniData(payloadText);
-          if (nfcParsed && nfcParsed.run && nfcParsed.run !== 'No detectado') {
-            savedNfcRun = nfcParsed.run;
-            lastVerifiedRun = nfcParsed.run;
-          }
+          currentNfcUid = serialNumber || 'ISO-DEP-CHIP-' + Math.floor(Math.random() * 899999 + 100000);
 
           cameraBtn.disabled = false;
           cameraBtn.style.opacity = '1';
@@ -326,7 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
           step2Badge.textContent = '📷 2. QR Listo';
           step2Badge.style.opacity = '1';
 
-          updateIdentityResult(payloadText, savedNfcSerial, true);
+          updateIdentityResult(payloadText, currentNfcUid, true);
           scanBtn.disabled = false;
         });
 
