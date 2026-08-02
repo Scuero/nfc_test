@@ -73,9 +73,39 @@ async function getVerifiedNameByRun(cleanRun) {
 }
 
 // Pipeline de Verificación de Identidad Chilena (Derivada exclusivamente de la Cédula de Identidad)
-async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDataInput, birthDateStr, age, expiryDateStr) {
+async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDataInput, birthDateStr, age, expiryDateStr, rawInputStr) {
   const cleanRun = run ? run.replace(/[^0-9kK]/g, '').toUpperCase() : '';
   const formattedRun = run ? formatRun(run) : null;
+  const upperInput = (rawInputStr || '').toUpperCase();
+
+  // 1. Decodificar Nombre desde Código de Barras PDF417 / ICAO 9303 MRZ (SURNAMES<<GIVEN_NAMES)
+  let mrzFullName = null;
+  let mrzGender = null;
+
+  const mrzNameMatch = upperInput.match(/([A-Z<]{8,})/g);
+  if (mrzNameMatch) {
+    for (const candidate of mrzNameMatch) {
+      if (candidate.includes('<<')) {
+        const parts = candidate.split('<<');
+        const sur = parts[0].replace(/P<CHL|IDCHL|[0-9<]/g, ' ').replace(/</g, ' ').trim();
+        const giv = parts[1] ? parts[1].replace(/[0-9<]/g, ' ').replace(/</g, ' ').trim() : '';
+        if (sur || giv) {
+          mrzFullName = `${giv} ${sur}`.replace(/\s+/g, ' ').trim();
+          break;
+        }
+      }
+    }
+  }
+
+  // 2. Decodificar Sexo desde cadena MRZ
+  if (upperInput.match(/CHL\d{6}\d[MF]\d{6}/)) {
+    const sexChar = upperInput.match(/CHL\d{6}\d([MF])\d{6}/)[1];
+    mrzGender = sexChar === 'M' ? 'Masculino (M)' : 'Femenino (F)';
+  } else if (mrzVal && mrzVal.length >= 24) {
+    const gByte = mrzVal.charAt(16);
+    if (gByte === 'M') mrzGender = 'Masculino (M)';
+    else if (gByte === 'F') mrzGender = 'Femenino (F)';
+  }
 
   // Método 1: Chip NFC eMRTD (ICAO 9303 / APDU)
   const nfcMethod = {
@@ -107,7 +137,7 @@ async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDa
     detalles: estadoOficialText
   };
 
-  // Método 3: API ClaveÚnica Gob.cl
+  // Método 3: API ClaveÚnica Gob.cl por Cédula
   let claveUnicaNombre = null;
   let claveUnicaSexo = null;
 
@@ -134,16 +164,8 @@ async function executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcDa
     endpoint: "https://accounts.claveunica.gob.cl/openid/userinfo"
   };
 
-  // Extraer Sexo desde byte MRZ si aplica
-  let mrzSexo = null;
-  if (mrzVal && mrzVal.length >= 24) {
-    const gByte = mrzVal.charAt(16);
-    if (gByte === 'M') mrzSexo = 'Masculino (M)';
-    else if (gByte === 'F') mrzSexo = 'Femenino (F)';
-  }
-
-  const resolvedFullName = claveUnicaNombre || (formattedRun ? `Titular Cédula RUN ${formattedRun}` : 'No detectado');
-  const resolvedGender = claveUnicaSexo || mrzSexo || 'Oficial Registrado';
+  const resolvedFullName = mrzFullName || claveUnicaNombre || (formattedRun ? `Titular Cédula RUN ${formattedRun}` : 'No detectado');
+  const resolvedGender = mrzGender || claveUnicaSexo || 'Oficial Registrado';
 
   return {
     fullName: resolvedFullName,
@@ -231,7 +253,7 @@ app.post('/api/parse-cedula', async (req, res) => {
     }
 
     // Ejecutar el Pipeline de Verificación Multimétodo
-    const verifiedResult = await executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcData, birthDateStr, age, expiryDateStr);
+    const verifiedResult = await executeMultiMethodIdentityVerification(run, serial, mrzVal, nfcData, birthDateStr, age, expiryDateStr, inputStr);
 
     res.json({
       success: true,
