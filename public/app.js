@@ -27,6 +27,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let isNfcVerified = false;
   let activeNfcUid = null;
   let activeNfcPayloadRun = null;
+  let activeNfcIsIsoDep = false;  // true = chip ISO-DEP sin datos legibles (cédula chilena)
+  let activeNfcHasRealUid = false; // true = serialNumber hardware real disponible
   let activeQrSerial = null;
   let activeQrRun = null;
   let currentSessionId = null;
@@ -187,43 +189,64 @@ document.addEventListener('DOMContentLoaded', () => {
       activeQrRun = fullData.run;
     }
 
-    // --- EVALUACIÓN DE COINCIDENCIA ANTI-SUPLANTACIÓN STRICTA ---
+    // --- EVALUACIÓN DE COINCIDENCIA ANTI-SUPLANTACIÓN ESTRICTA ---
     let isMismatch = false;
+    let isIndeterminate = false; // true = no hay evidencia suficiente para confirmar coincidencia
     let evaluacionMotivo = '';
 
     if (isNfcVerified && !isNfcScan && activeQrSerial && activeQrSerial !== 'No detectado') {
-      // 1. Si el NFC traía información de RUN y difiere del RUN del QR
-      if (activeNfcPayloadRun && activeQrRun && activeNfcPayloadRun !== activeQrRun) {
-        isMismatch = true;
-        evaluacionMotivo = `El Chip NFC pertenece a la Cédula RUN ${activeNfcPayloadRun}, pero el QR pertenece a la Cédula RUN ${activeQrRun}.`;
+
+      // CASO 1: NFC entregó un RUN → comparación directa posible
+      if (activeNfcPayloadRun) {
+        if (activeQrRun && activeNfcPayloadRun !== activeQrRun) {
+          // Misma sesión, distintas cédulas → MISMATCH definitivo
+          isMismatch = true;
+          evaluacionMotivo = `⛔ El Chip NFC pertenece al RUN ${activeNfcPayloadRun}, pero el QR pertenece al RUN ${activeQrRun}. Son cédulas DISTINTAS.`;
+        } else {
+          // RUN del NFC coincide con el RUN del QR → COINCIDENCIA REAL verificada
+          nfcToQrMap[activeNfcUid] = activeQrSerial;
+          qrToNfcMap[activeQrSerial] = activeNfcUid;
+          evaluacionMotivo = `RUN del chip NFC (${activeNfcPayloadRun}) coincide con el RUN del QR. Cédula auténtica verificada.`;
+        }
       }
-      // 2. Si este Chip NFC ya fue vinculado a un Serial QR previo y se intenta usar un QR diferente
-      else if (activeNfcUid && nfcToQrMap[activeNfcUid] && nfcToQrMap[activeNfcUid] !== activeQrSerial) {
-        isMismatch = true;
-        evaluacionMotivo = `El Chip NFC (${activeNfcUid}) está vinculado al Serial ${nfcToQrMap[activeNfcUid]}, pero el QR escaneado es Serial ${activeQrSerial}.`;
+
+      // CASO 2: NFC con UID hardware real (serialNumber), sin RUN en payload
+      else if (activeNfcHasRealUid) {
+        if (nfcToQrMap[activeNfcUid] && nfcToQrMap[activeNfcUid] !== activeQrSerial) {
+          // Este chip ya fue vinculado a otro serial → MISMATCH
+          isMismatch = true;
+          evaluacionMotivo = `⛔ El Chip NFC (${activeNfcUid}) fue vinculado antes al Serial ${nfcToQrMap[activeNfcUid]}, pero ahora se usa el Serial ${activeQrSerial}.`;
+        } else if (qrToNfcMap[activeQrSerial] && qrToNfcMap[activeQrSerial] !== activeNfcUid) {
+          // Este serial QR ya fue vinculado a otro chip → MISMATCH
+          isMismatch = true;
+          evaluacionMotivo = `⛔ La Cédula Serial ${activeQrSerial} fue vinculada antes al Chip ${qrToNfcMap[activeQrSerial]}, pero ahora se aproximó ${activeNfcUid}.`;
+        } else {
+          // Primera vez → registrar vínculo hardware
+          nfcToQrMap[activeNfcUid] = activeQrSerial;
+          qrToNfcMap[activeQrSerial] = activeNfcUid;
+          evaluacionMotivo = `UID hardware NFC (${activeNfcUid}) vinculado al Serial ${activeQrSerial}. Vínculo registrado para verificaciones futuras.`;
+        }
       }
-      // 3. Si el Serial QR escaneado ya pertenece a un Chip NFC previo distinto
-      else if (qrToNfcMap[activeQrSerial] && activeNfcUid && qrToNfcMap[activeQrSerial] !== activeNfcUid) {
-        isMismatch = true;
-        evaluacionMotivo = `La Cédula Serial ${activeQrSerial} pertenece a otro Chip NFC (${qrToNfcMap[activeQrSerial]}), pero se aproximó ${activeNfcUid}.`;
-      }
-      // 4. Registrar vinculación legítima para esta Cédula
-      else if (activeNfcUid) {
-        nfcToQrMap[activeNfcUid] = activeQrSerial;
-        qrToNfcMap[activeQrSerial] = activeNfcUid;
-        evaluacionMotivo = `Coincidencia autenticada. Chip NFC (${activeNfcUid}) vinculado a la Cédula Serial ${activeQrSerial} (RUN ${activeQrRun}).`;
+
+      // CASO 3: Chip ISO-DEP sin RUN ni UID real (cédula chilena típica)
+      // → NO HAY EVIDENCIA PARA CONFIRMAR QUE EL NFC Y EL QR SON DE LA MISMA CÉDULA
+      else {
+        isIndeterminate = true;
+        evaluacionMotivo = `El chip NFC detectado es ISO-DEP/eMRTD y no expone RUN ni UID de hardware a través de Web NFC API. Es imposible confirmar criptográficamente que el chip y el QR pertenecen a la misma cédula. Se requiere verificación adicional.`;
       }
     }
 
     const debugAntiSuplantacion = {
       sessionId: currentSessionId || 'Sin sesión',
       nfcPaso1Completado: isNfcVerified,
+      nfcTipoChip: activeNfcIsIsoDep ? 'ISO-DEP/eMRTD (sin datos NDEF)' : 'NDEF',
+      nfcUidReal: activeNfcHasRealUid,
       activeNfcUid: activeNfcUid || 'No asignado',
       activeNfcPayloadRun: activeNfcPayloadRun || 'No disponible en NDEF',
       activeQrSerialScanned: activeQrSerial || 'No detectado',
       activeQrRunScanned: activeQrRun || 'No detectado',
       hardwareBoundSerial: activeNfcUid ? (nfcToQrMap[activeNfcUid] || 'No vinculado') : 'N/A',
-      coincidenciaNfcYQr: !isMismatch,
+      estadoVerificacion: isMismatch ? 'MISMATCH' : isIndeterminate ? 'INDETERMINADO' : 'OK',
       evaluacionMotivo: evaluacionMotivo || (isNfcScan ? 'Paso 1 NFC completado. Esperando escaneo de código QR (Paso 2)...' : 'Pendiente...')
     };
 
@@ -260,6 +283,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isMismatch) {
       fullData.estadoOficial = '⚠️ ALERTA DE SUPLANTACIÓN: Código QR no corresponde a la Cédula leída por NFC';
       fullData.proteccionAntiSuplantacion = '⚠️ ALERTA CRÍTICA: Desacople Detectado entre Chip NFC y Código QR';
+    } else if (isIndeterminate) {
+      fullData.estadoOficial = '⚠️ VERIFICACIÓN INCOMPLETA: No fue posible vincular el chip NFC con el QR';
+      fullData.proteccionAntiSuplantacion = '⚠️ VERIFICACIÓN PARCIAL: El chip ISO-DEP no expone datos comparables';
     }
 
     fullData.debugAntiSuplantacion = debugAntiSuplantacion;
@@ -273,13 +299,24 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('val-status-official').textContent = fullData.estadoOficial;
     document.getElementById('val-raw').textContent = rawText || tramiteVal || '--';
 
+    const statusEl = document.getElementById('val-status-official');
     if (isMismatch) {
-      document.getElementById('val-status-official').textContent = '⚠️ ALERTA DE SUPLANTACIÓN DE IDENTIDAD';
-      document.getElementById('val-status-official').style.color = '#ef4444';
+      statusEl.textContent = '⛔ ALERTA DE SUPLANTACIÓN DE IDENTIDAD';
+      statusEl.style.color = '#ef4444';
       showStatus('⚠️ <strong>ALERTA CRÍTICA DE SUPLANTACIÓN:</strong> ' + evaluacionMotivo + '<br>🔴 <strong>Acceso Denegado:</strong> Documento adulterado o suplantado.', 'error');
-    } else if (isNfcVerified && activeQrSerial) {
-      document.getElementById('val-status-official').textContent = '🛡️ 100% VIGENTE (Coincidencia Perfecta Chip NFC + Código QR)';
-      document.getElementById('val-status-official').style.color = '#34d399';
+    } else if (isIndeterminate) {
+      // Chip ISO-DEP sin datos → no podemos confirmar que sean la misma cédula
+      statusEl.textContent = '⚠️ VERIFICACIÓN INCOMPLETA — Confirme identidad manualmente';
+      statusEl.style.color = '#f59e0b';
+      showStatus(
+        '⚠️ <strong>VERIFICACIÓN INCOMPLETA:</strong> El chip NFC de la cédula chilena (ISO-DEP/eMRTD) no expone RUN ni UID de hardware a través de la API Web NFC.' +
+        '<br>⚠️ <strong>No es posible confirmar que el NFC y el QR sean de la misma cédula.</strong>' +
+        '<br>🔶 Verifique manualmente que la cédula aproximada al NFC es la misma que la escaneada por QR.',
+        'error'
+      );
+    } else if (isNfcVerified && activeQrSerial && !isIndeterminate) {
+      statusEl.textContent = '🛡️ 100% VIGENTE — Coincidencia NFC + QR Verificada';
+      statusEl.style.color = '#34d399';
       showStatus('🛡️ <strong>CÉDULA 100% AUTÉNTICA Y VIGENTE:</strong> ' + evaluacionMotivo, 'success');
     } else if (isNfcScan) {
       showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado.<br>👉 <strong>Ahora presione "2. Escanear QR"</strong>.', 'success');
@@ -300,13 +337,14 @@ document.addEventListener('DOMContentLoaded', () => {
       // Iniciar nueva sesión de escaneo limpia — resetear TODOS los datos de sesión anterior
       currentSessionId = 'SESION_' + Date.now();
       isNfcVerified = false;
-      activeNfcUid = null;         // ← crítico: olvidar UID de cédula anterior
+      activeNfcUid = null;
+      activeNfcPayloadRun = null;
+      activeNfcIsIsoDep = false;
+      activeNfcHasRealUid = false;
       activeQrSerial = null;
       activeQrRun = null;
-      activeNfcPayloadRun = null;
-      nfcToQrMap = {};             // ← limpiar vínculos de sesiones previas
+      nfcToQrMap = {};
       qrToNfcMap = {};
-      // Limpiar campo de datos para no mezclar con cédula anterior
       tramiteInput.value = '';
       resultCard.classList.remove('active');
       currentExtractedData = null;
@@ -320,16 +358,19 @@ document.addEventListener('DOMContentLoaded', () => {
         showStatus('Buscando chip NFC/eMRTD... Mantenga la Cédula firme.', 'info');
 
         ndef.addEventListener('readingerror', () => {
-          console.log('NFC detectado (Cédula Chilena ISO-DEP).');
+          // Chip ISO-DEP/eMRTD (cédula chilena) — sin RUN ni UID real disponible via Web NFC
+          console.log('NFC detectado (Cédula Chilena ISO-DEP — sin datos NDEF).');
           isNfcVerified = true;
-          activeNfcUid = 'NFC_TAG_' + currentSessionId;
+          activeNfcIsIsoDep = true;      // ← marca: no podemos comparar con el QR
+          activeNfcHasRealUid = false;
+          activeNfcUid = 'NFC_ISODEP_' + currentSessionId; // sintético, no usable para binding
 
           cameraBtn.disabled = false;
           cameraBtn.style.opacity = '1';
           cameraBtn.style.cursor = 'pointer';
           cameraBtn.innerHTML = '📷 2. Escanear QR (Desbloqueado)';
 
-          step1Badge.textContent = '✅ 1. NFC Leído';
+          step1Badge.textContent = '✅ 1. NFC Leído (ISO-DEP)';
           step2Badge.textContent = '📷 2. QR Listo';
           step2Badge.style.opacity = '1';
 
@@ -348,7 +389,14 @@ document.addEventListener('DOMContentLoaded', () => {
           }
 
           isNfcVerified = true;
-          activeNfcUid = serialNumber ? ('NFC_HW_' + serialNumber.replace(/:/g, '').toUpperCase()) : ('NFC_TAG_' + currentSessionId);
+          activeNfcIsIsoDep = false;
+          if (serialNumber) {
+            activeNfcUid = 'NFC_HW_' + serialNumber.replace(/:/g, '').toUpperCase();
+            activeNfcHasRealUid = true;  // UID real → puede usarse para binding
+          } else {
+            activeNfcUid = 'NFC_TAG_' + currentSessionId;
+            activeNfcHasRealUid = false;
+          }
 
           cameraBtn.disabled = false;
           cameraBtn.style.opacity = '1';
