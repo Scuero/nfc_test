@@ -19,9 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let cameraInterval = null;
   let currentExtractedData = null;
 
-  // MAPA PERSISTENTE DE VINCULACIÓN HARDWARE DE CÉDULAS (NFC Hardware UID <-> Serial QR)
-  const nfcToQrMap = {};
-  const qrToNfcMap = {};
+  // MAPA DE VINCULACIÓN HARDWARE DE CÉDULAS (NFC Hardware UID <-> Serial QR) - por sesión
+  let nfcToQrMap = {};
+  let qrToNfcMap = {};
 
   // ESTADO DE LA SESIÓN DE LECTURA ACTUAL
   let isNfcVerified = false;
@@ -297,12 +297,19 @@ document.addEventListener('DOMContentLoaded', () => {
       hideStatus();
       scanBtn.disabled = true;
 
-      // Iniciar nueva sesión de escaneo limpia
+      // Iniciar nueva sesión de escaneo limpia — resetear TODOS los datos de sesión anterior
       currentSessionId = 'SESION_' + Date.now();
       isNfcVerified = false;
+      activeNfcUid = null;         // ← crítico: olvidar UID de cédula anterior
       activeQrSerial = null;
       activeQrRun = null;
       activeNfcPayloadRun = null;
+      nfcToQrMap = {};             // ← limpiar vínculos de sesiones previas
+      qrToNfcMap = {};
+      // Limpiar campo de datos para no mezclar con cédula anterior
+      tramiteInput.value = '';
+      resultCard.classList.remove('active');
+      currentExtractedData = null;
 
       try {
         showStatus('Aproxime la Cédula de Identidad a la antena NFC posterior del celular...', 'info');
@@ -370,6 +377,10 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus('⚠️ Debe aproximar la Cédula por NFC (Paso 1) antes de activar la cámara.', 'error');
       return;
     }
+    // Limpiar datos QR de escaneos previos antes de iniciar la cámara
+    activeQrSerial = null;
+    activeQrRun = null;
+    tramiteInput.value = '';
     startCameraScanner();
   });
 
