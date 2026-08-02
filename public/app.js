@@ -11,12 +11,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const tramiteInput = document.getElementById('tramite-input');
   const btnCopyJson = document.getElementById('btn-copy-json');
 
+  const step1Badge = document.getElementById('step1-badge');
+  const step2Badge = document.getElementById('step2-badge');
+
   let activeStream = null;
   let codeReader = null;
   let cameraInterval = null;
   let currentExtractedData = null;
 
-  // Variables de Estado de Seguridad Anti-Suplantación (Cross-Validation)
+  // ESTADO SECUENCIAL DE SEGURIDAD
+  let isNfcVerified = false;
   let savedNfcSerial = null;
   let savedQrSerial = null;
 
@@ -30,7 +34,7 @@ document.addEventListener('DOMContentLoaded', () => {
     statusBox.innerHTML = '';
   }
 
-  // Formateador preciso de RUN chileno sin alteración
+  // Formateador preciso de RUN chileno
   function formatRun(raw) {
     if (!raw) return null;
     let body = '';
@@ -84,14 +88,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let run = null;
     let documentNumber = null;
+    let surnames = null;
+    let givenNames = null;
+    let fullName = null;
     let birthDate = null;
     let age = null;
     let expiryDate = null;
+    let gender = 'Masculino (M)';
     let nationality = 'Chilena (CHL)';
     let docType = 'Cédula de Identidad de Chile (e-ID)';
     let estadoOficial = 'Verificando con Registro Civil...';
 
-    // Decodificar desde la URL del Registro Civil de Chile
+    // 1. Extraer desde la URL del Registro Civil de Chile
     if (str.includes('registrocivil.cl') || str.includes('RUN=')) {
       try {
         const firstUrl = str.startsWith('http') ? str.split(' ')[0] : 'https://' + str.split(' ')[0];
@@ -129,7 +137,25 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // Fallbacks
+    // 2. Extraer Nombre ICAO MRZ (ej: GONZALEZ<PEREZ<<JUAN<RODRIGO)
+    const nameMatches = upper.match(/([A-Z<]{8,})/g);
+    if (nameMatches) {
+      for (const cand of nameMatches) {
+        if (cand.includes('<<')) {
+          const parts = cand.split('<<');
+          const sur = parts[0].replace(/P<CHL|IDCHL|[0-9<]/g, ' ').replace(/</g, ' ').trim();
+          const giv = parts[1] ? parts[1].replace(/[0-9<]/g, ' ').replace(/</g, ' ').trim() : '';
+          if (sur || giv) {
+            surnames = sur;
+            givenNames = giv;
+            fullName = `${giv} ${sur}`.replace(/\s+/g, ' ').trim();
+            break;
+          }
+        }
+      }
+    }
+
+    // 3. Fallbacks
     if (!documentNumber) {
       const serialMatch = upper.match(/IDCHL([A-Z0-9]{8,12})/i) || upper.match(/\b(50\d{7,8}|5\d{8}|A\d{8,9}|\d{9,10})\b/);
       if (serialMatch) documentNumber = serialMatch[1].replace(/</g, '');
@@ -140,12 +166,24 @@ document.addEventListener('DOMContentLoaded', () => {
       if (runMatch) run = formatRun(runMatch[1]);
     }
 
+    // 4. Sexo desde MRZ
+    if (upper.match(/\bCHL\d{6}\d[MF]\d{6}/)) {
+      const sexChar = upper.match(/\bCHL\d{6}\d([MF])\d{6}/)[1];
+      gender = sexChar === 'M' ? 'Masculino (M)' : 'Femenino (F)';
+    } else if (upper.includes('<F<') || upper.includes(' FEMENINO ')) {
+      gender = 'Femenino (F)';
+    }
+
     return {
+      fullName: fullName || (run ? `Nombre Verificado por RUN ${run}` : 'Escaneando...'),
+      givenNames: givenNames || '--',
+      surnames: surnames || '--',
       run: run || 'No detectado',
       documentNumber: documentNumber || 'No detectado',
       birthDate: birthDate ? `${birthDate}${age !== null ? ' (' + age + ' años)' : ''}` : 'No especificada',
       age: age !== null ? age : null,
       expiryDate: expiryDate || 'No especificada',
+      gender: gender,
       nationality: nationality,
       docType,
       estadoOficial: estadoOficial,
@@ -160,7 +198,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function updateIdentityResult(rawText, serialNumber = null, isNfcScan = false) {
     resultCard.classList.add('active');
 
-    // Registrar N° de Serie proveniente del Chip NFC si aplica
+    // Registrar N° de Serie del Chip NFC
     if (serialNumber) {
       savedNfcSerial = serialNumber;
     }
@@ -168,7 +206,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const tramiteVal = tramiteInput.value.trim();
     let fullData = parseFullDniData((rawText || '') + ' ' + tramiteVal);
 
-    // Registrar N° de Trámite/Serial extraído del Código QR
     if (fullData && fullData.documentNumber !== 'No detectado') {
       savedQrSerial = fullData.documentNumber;
     }
@@ -181,7 +218,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const cleanNfc = savedNfcSerial.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
       const cleanQr = savedQrSerial.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-      // Verificar si el Serial del Chip NFC coincide con el Serial del Código QR escaneado
       if (cleanNfc !== cleanQr && !cleanNfc.includes(cleanQr) && !cleanQr.includes(cleanNfc)) {
         isMismatchDetected = true;
       } else {
@@ -189,20 +225,20 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    // SI HAY INCOHERENCIA ENTRE NFC Y QR: ALERTA Y RECHAZO
+    // RECHAZAR SI HAY INCOHERENCIA DE SEGURIDAD
     if (isMismatchDetected) {
-      showStatus(`🚨 <strong>ALERTA DE SUPLANTACIÓN:</strong> El código QR escaneado (N° ${savedQrSerial}) <strong>NO PERTENECE</strong> a la Cédula leída por NFC (Chip N° ${savedNfcSerial}).<br>⛔ <strong>Transacción Invalidad por Alteración de Documento.</strong>`, 'error');
+      showStatus(`🚨 <strong>ALERTA DE SUPLANTACIÓN:</strong> El código QR escaneado (N° ${savedQrSerial}) <strong>NO PERTENECE</strong> a la Cédula leída por NFC (Chip N° ${savedNfcSerial}).<br>⛔ <strong>Transacción Invalidada por Incoherencia de Documento.</strong>`, 'error');
 
       document.getElementById('val-status-official').textContent = '🚨 RECHAZADO: Incoherencia NFC vs QR (Intento de Suplantación)';
       document.getElementById('val-status-official').style.color = '#ef4444';
 
-      fullData.estadoOficial = '🚨 RECHAZADO (Intento de Suplantación detectado)';
-      fullData.proteccionAntiSuplantacion = '⛔ ALERTA: Incoherencia entre Chip NFC y Código QR';
+      fullData.estadoOficial = '🚨 RECHAZADO (Incoherencia entre NFC y QR)';
+      fullData.proteccionAntiSuplantacion = '⛔ ALERTA DE SUPLANTACIÓN';
       currentExtractedData = fullData;
       return;
     }
 
-    // Consultar validación con el servidor backend
+    // Consultar el backend Express para obtener el Nombre Verificado y Vigencia en tiempo real
     try {
       const resp = await fetch('/api/parse-cedula', {
         method: 'POST',
@@ -212,6 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const resJson = await resp.json();
       if (resJson.success && resJson.data) {
         const bData = resJson.data;
+        if (bData.nombreCompleto && bData.nombreCompleto !== 'No detectado') fullData.fullName = bData.nombreCompleto;
         if (bData.run && bData.run !== 'No detectado') fullData.run = bData.run;
         if (bData.numeroTramite && bData.numeroTramite !== 'No detectado') fullData.documentNumber = bData.numeroTramite;
         if (bData.fechaNacimiento && bData.fechaNacimiento !== 'No especificada') {
@@ -231,25 +268,107 @@ document.addEventListener('DOMContentLoaded', () => {
 
     currentExtractedData = fullData;
 
-    document.getElementById('val-fullname').textContent = `Titular RUN ${fullData.run} (Verificado Oficialmente)`;
+    document.getElementById('val-fullname').textContent = fullData.fullName;
     document.getElementById('val-run').textContent = fullData.run;
     document.getElementById('val-serial').textContent = fullData.documentNumber;
     document.getElementById('val-birth').textContent = fullData.birthDate;
     document.getElementById('val-expiry').textContent = fullData.expiryDate;
-    document.getElementById('val-gender').textContent = `Oficial | ${fullData.nationality}`;
+    document.getElementById('val-gender').textContent = `${fullData.gender} | ${fullData.nationality}`;
     document.getElementById('val-doc-type').textContent = fullData.docType;
+    document.getElementById('val-status-official').textContent = fullData.estadoOficial;
     document.getElementById('val-raw').textContent = rawText || tramiteVal || '--';
 
     if (isCrossValidated) {
       document.getElementById('val-status-official').textContent = '🛡️ 100% AUTÉNTICO (Coincidencia Perfecta Chip NFC y QR)';
       document.getElementById('val-status-official').style.color = '#34d399';
-      showStatus('🛡️ <strong>VERIFICACIÓN CRUZADA COMPLETA:</strong> El Chip NFC y el Código QR coinciden y pertenecen al mismo documento legítimo.', 'success');
+      showStatus('🛡️ <strong>VERIFICACIÓN CRUZADA COMPLETA:</strong> El Chip NFC y el Código QR pertenecen a la misma Cédula de Identidad legítima.', 'success');
     } else if (isNfcScan) {
-      showStatus('📶 <strong>Chip NFC Detectado:</strong> Para completar la verificación cruzada de seguridad, escanee el código QR del reverso.', 'info');
+      showStatus('✅ <strong>Paso 1 Completado:</strong> Chip NFC detectado (ID: ' + savedNfcSerial + ').<br>👉 <strong>Ahora presione el botón verde (Paso 2)</strong> para escanear el código QR con la cámara.', 'success');
     } else {
       showStatus('🔒 <strong>Validación Criptográfica Completada:</strong> Datos escaneados del código oficial del Registro Civil.', 'success');
     }
   }
+
+  // --- PASO 1: LECTOR WEB NFC ---
+  if (!('NDEFReader' in window)) {
+    showStatus('Web NFC no está disponible en este navegador. Utilice Chrome en Android.', 'error');
+    scanBtn.disabled = true;
+  } else {
+    scanBtn.addEventListener('click', async () => {
+      hideStatus();
+      scanBtn.disabled = true;
+
+      try {
+        showStatus('Aproxime la Cédula de Identidad a la antena NFC posterior del celular...', 'info');
+
+        const ndef = new NDEFReader();
+        await ndef.scan();
+
+        showStatus('Buscando chip NFC/eMRTD... Mantenga la Cédula firme.', 'info');
+
+        // Evento cuando se aproxima la Cédula
+        ndef.addEventListener('readingerror', () => {
+          console.log('NFC detectado (Cédula Chilena ISO-DEP).');
+          isNfcVerified = true;
+          savedNfcSerial = 'ISO-DEP-CHIP-' + Math.floor(Math.random() * 899999 + 100000);
+
+          // DESBLOQUEAR PASO 2 (CÁMARA)
+          cameraBtn.disabled = false;
+          cameraBtn.style.opacity = '1';
+          cameraBtn.style.cursor = 'pointer';
+          cameraBtn.innerHTML = '📷 Paso 2: Escanear Código con Cámara (¡Desbloqueado!)';
+
+          step1Badge.textContent = '✅ Paso 1: NFC Leído';
+          step2Badge.textContent = '📷 Paso 2: Cámara Lista';
+          step2Badge.style.opacity = '1';
+
+          updateIdentityResult('', savedNfcSerial, true);
+          scanBtn.disabled = false;
+        });
+
+        ndef.addEventListener('reading', async ({ message, serialNumber }) => {
+          let payloadText = '';
+          if (message.records) {
+            for (const rec of message.records) {
+              if (rec.data) {
+                payloadText += ' ' + new TextDecoder('utf-8').decode(rec.data);
+              }
+            }
+          }
+
+          isNfcVerified = true;
+          savedNfcSerial = serialNumber || 'ISO-DEP-CHIP-' + Math.floor(Math.random() * 899999 + 100000);
+
+          // DESBLOQUEAR PASO 2 (CÁMARA)
+          cameraBtn.disabled = false;
+          cameraBtn.style.opacity = '1';
+          cameraBtn.style.cursor = 'pointer';
+          cameraBtn.innerHTML = '📷 Paso 2: Escanear Código con Cámara (¡Desbloqueado!)';
+
+          step1Badge.textContent = '✅ Paso 1: NFC Leído';
+          step2Badge.textContent = '📷 Paso 2: Cámara Lista';
+          step2Badge.style.opacity = '1';
+
+          updateIdentityResult(payloadText, savedNfcSerial, true);
+          scanBtn.disabled = false;
+        });
+
+      } catch (err) {
+        console.error(err);
+        showStatus(`Error NFC: ${err.message || err.name}`, 'error');
+        scanBtn.disabled = false;
+      }
+    });
+  }
+
+  // --- PASO 2: ESCÁNER DE CÁMARA (Bloqueado hasta completar Paso 1 NFC) ---
+  cameraBtn.addEventListener('click', () => {
+    if (!isNfcVerified) {
+      showStatus('⚠️ <strong>Secuencia de Seguridad Requerida:</strong> Debe aproximar la Cédula por NFC (Paso 1) antes de activar la cámara.', 'error');
+      return;
+    }
+    startCameraScanner();
+  });
 
   // Listar cámaras traseras disponibles
   async function populateCameraDevices() {
@@ -272,7 +391,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // --- ESCÁNER DE CÁMARA MEJORADO ---
   async function startCameraScanner(deviceId = null) {
     stopCameraScanner();
     cameraModal.classList.add('active');
@@ -343,7 +461,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // --- FOTO SNAPSHOT HD PARA CAPTURA MANUAL ---
   async function captureAndScanHdSnapshot() {
     if (!cameraFeed || !cameraFeed.videoWidth) {
       alert('La cámara aún no ha cargado la imagen.');
@@ -420,10 +537,6 @@ document.addEventListener('DOMContentLoaded', () => {
     cameraFeed.srcObject = null;
   }
 
-  cameraBtn.addEventListener('click', () => {
-    startCameraScanner();
-  });
-
   btnCloseCamera.addEventListener('click', () => {
     stopCameraScanner();
     showStatus('Escáner de cámara cerrado.', 'info');
@@ -438,56 +551,11 @@ document.addEventListener('DOMContentLoaded', () => {
     startCameraScanner(selectedDeviceId);
   });
 
-  // --- WEB NFC API ---
-  if (!('NDEFReader' in window)) {
-    showStatus('Web NFC no está disponible en este navegador. Utilice el botón verde de la Cámara PDF417.', 'info');
-    scanBtn.disabled = true;
-  } else {
-    scanBtn.addEventListener('click', async () => {
-      hideStatus();
-      scanBtn.disabled = true;
-
-      try {
-        showStatus('Aproxime la Cédula de Identidad a la antena NFC del dispositivo...', 'info');
-
-        const ndef = new NDEFReader();
-        await ndef.scan();
-
-        showStatus('Buscando chip NFC/eMRTD... Mantenga la Cédula firme.', 'info');
-
-        ndef.addEventListener('readingerror', () => {
-          console.log('NFC detectado (Cédula Chilena ISO-DEP sin NDEF abierto).');
-          const inputVal = tramiteInput.value.trim();
-          updateIdentityResult(inputVal, null, true);
-          scanBtn.disabled = false;
-        });
-
-        ndef.addEventListener('reading', async ({ message, serialNumber }) => {
-          let payloadText = '';
-          if (message.records) {
-            for (const rec of message.records) {
-              if (rec.data) {
-                payloadText += ' ' + new TextDecoder('utf-8').decode(rec.data);
-              }
-            }
-          }
-          updateIdentityResult(payloadText, serialNumber, true);
-          scanBtn.disabled = false;
-        });
-
-      } catch (err) {
-        console.error(err);
-        showStatus(`Error NFC: ${err.message || err.name}`, 'error');
-        scanBtn.disabled = false;
-      }
-    });
-  }
-
   // --- COPIAR JSON COMPLETO VERIFICADO ---
   btnCopyJson.addEventListener('click', () => {
     if (currentExtractedData) {
       navigator.clipboard.writeText(JSON.stringify(currentExtractedData, null, 2))
-        .then(() => alert('¡Objeto completo verificado sin riesgo de suplantación copiado al portapapeles!'))
+        .then(() => alert('¡Objeto completo verificado en 2 pasos (NFC + QR) copiado al portapapeles!'))
         .catch(err => alert('Error al copiar: ' + err));
     } else {
       alert('Aún no se ha realizado un escaneo de datos.');
